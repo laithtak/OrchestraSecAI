@@ -1,7 +1,5 @@
 from unittest.mock import MagicMock
 
-import pytest
-
 from orchestrasecai.domain.verification import (
     can_scan_unverified_target,
     check_dns_txt_verification,

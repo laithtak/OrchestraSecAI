@@ -4,7 +4,7 @@ from uuid import UUID
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from jose import JWTError, jwt
+from jose import jwt
 
 from orchestrasecai.config import get_settings
 

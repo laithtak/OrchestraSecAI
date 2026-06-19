@@ -2,8 +2,6 @@ import asyncio
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
-
 import httpx
 
 from orchestrasecai.checks.base import PageContext

@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from orchestrasecai.api.deps import get_current_user
 from orchestrasecai.api.schemas import LoginRequest, MeResponse, RefreshRequest, TokenResponse, UserOut
-from orchestrasecai.config import get_settings
 from orchestrasecai.persistence.session import get_db
 from orchestrasecai.persistence.tables.core import Organization, User
 from orchestrasecai.security.auth import (

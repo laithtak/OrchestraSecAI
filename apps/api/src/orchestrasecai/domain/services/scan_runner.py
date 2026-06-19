@@ -3,7 +3,6 @@ import time
 from uuid import UUID
 
 from redis.asyncio import Redis
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from orchestrasecai.checks.base import CheckContext, FindingDraft

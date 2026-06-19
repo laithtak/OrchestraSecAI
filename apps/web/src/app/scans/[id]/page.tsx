@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { DashboardShell } from "@/components/layout/DashboardShell";
 import { Card } from "@/components/ui/card";
@@ -29,10 +29,10 @@ export default function ScanDetailPage() {
   const [findings, setFindings] = useState<Finding[]>([]);
   const { events, status: eventStatus } = useScanEvents(id);
 
-  const load = () => {
+  const load = useCallback(() => {
     api<Scan>(`/scans/${id}`).then(setScan);
     api<Finding[]>(`/scans/${id}/findings`).then(setFindings);
-  };
+  }, [id]);
 
   useEffect(() => {
     if (!localStorage.getItem("access_token")) {
@@ -42,7 +42,7 @@ export default function ScanDetailPage() {
     load();
     const interval = setInterval(load, 3000);
     return () => clearInterval(interval);
-  }, [id, router, eventStatus]);
+  }, [id, router, eventStatus, load]);
 
   const openReport = async () => {
     const { url } = await api<{ url: string }>(

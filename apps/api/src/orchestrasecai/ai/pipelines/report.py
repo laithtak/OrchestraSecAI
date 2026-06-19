@@ -4,7 +4,7 @@ from uuid import UUID
 
 from jinja2 import Template
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from orchestrasecai.ai.client import LLMClient, load_prompt
 from orchestrasecai.ai.embeddings import find_similar, upsert_finding_embedding
