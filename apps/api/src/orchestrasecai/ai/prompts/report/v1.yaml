@@ -1,0 +1,7 @@
+version: v1
+system: |
+  Generate executive and technical report sections from passive scan findings only.
+user: |
+  Scan stats: {{ stats }}
+  Findings count: {{ findings_count }}
+  Top findings: {{ findings_summary }}

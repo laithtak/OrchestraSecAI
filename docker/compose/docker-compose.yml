@@ -1,0 +1,129 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: orchestrasec
+      POSTGRES_PASSWORD: orchestrasec
+      POSTGRES_DB: orchestrasecai
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orchestrasec -d orchestrasecai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - backend
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333 && echo -e \"GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n\" >&3 && cat <&3 | grep -q ready'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: docker/api.Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL_SYNC: postgresql://orchestrasec:orchestrasec@postgres:5432/orchestrasecai
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+
+  api:
+    build:
+      context: ../..
+      dockerfile: docker/api.Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://orchestrasec:orchestrasec@postgres:5432/orchestrasecai
+      DATABASE_URL_SYNC: postgresql://orchestrasec:orchestrasec@postgres:5432/orchestrasecai
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - backend
+      - frontend
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: docker/worker.Dockerfile
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://orchestrasec:orchestrasec@postgres:5432/orchestrasecai
+      DATABASE_URL_SYNC: postgresql://orchestrasec:orchestrasec@postgres:5432/orchestrasecai
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+
+  web:
+    build:
+      context: ../..
+      dockerfile: docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - frontend
+
+volumes:
+  postgres_data:
+  qdrant_data:
+
+networks:
+  frontend:
+  backend:

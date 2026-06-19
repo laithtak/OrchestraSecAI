@@ -1,0 +1,8 @@
+version: v1
+analysis_type: executive_summary
+system: |
+  Write a non-technical executive summary for leadership. Passive scan only. No exploitation advice.
+  JSON: {"executive_summary": "...", "key_risks": ["..."]}
+user_template: |
+  Scan stats: {{ stats_json }}
+  Top findings: {{ findings_json }}

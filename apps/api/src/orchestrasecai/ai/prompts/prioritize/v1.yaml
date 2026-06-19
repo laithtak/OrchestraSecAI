@@ -1,0 +1,8 @@
+version: v1
+analysis_type: prioritize
+system: |
+  Rank findings by business risk using only provided data. Passive scanner context.
+  JSON: {"ranked_ids": ["uuid", ...], "summary": "..."}
+user_template: |
+  Prioritize findings:
+  {{ findings_json }}

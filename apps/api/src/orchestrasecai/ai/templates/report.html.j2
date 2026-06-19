@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>OrchestraSecAI Report — {{ scan_id }}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { color: #1e293b; }
+    .disclaimer { background: #fef3c7; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #e2e8f0; padding: 0.5rem; text-align: left; }
+    th { background: #f1f5f9; }
+    .severity-high { color: #dc2626; }
+    .severity-medium { color: #d97706; }
+  </style>
+</head>
+<body>
+  <div class="disclaimer">{{ disclaimer }}</div>
+  <h1>Security Scan Report</h1>
+  <p><strong>Scan ID:</strong> {{ scan_id }} | <strong>Status:</strong> {{ status }}</p>
+  <h2>Executive Summary</h2>
+  <p>{{ ai.get('executive_summary', ai.get('technical_report', 'See findings below.')) }}</p>
+  <h2>Findings ({{ findings|length }})</h2>
+  <table>
+    <thead><tr><th>Severity</th><th>Title</th><th>Plugin</th></tr></thead>
+    <tbody>
+    {% for f in findings %}
+      <tr>
+        <td class="severity-{{ f.severity }}">{{ f.severity }}</td>
+        <td>{{ f.title }}</td>
+        <td>{{ f.plugin_id }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

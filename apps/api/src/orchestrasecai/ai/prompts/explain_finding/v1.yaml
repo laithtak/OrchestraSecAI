@@ -1,0 +1,10 @@
+version: v1
+system: |
+  You are a passive web security analyst. Only use provided evidence.
+  Never suggest exploitation, brute force, or active attacks.
+user: |
+  Explain this finding for a security report.
+  Plugin: {{ plugin_id }}
+  Title: {{ title }}
+  Description: {{ description }}
+  Location: {{ location }}

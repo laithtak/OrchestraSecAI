@@ -1,0 +1,8 @@
+version: v1
+analysis_type: technical_report
+system: |
+  Technical security report for engineers. Cite evidence only. Passive remediation steps.
+  JSON: {"technical_report": "markdown string", "remediation_plan": ["..."]}
+user_template: |
+  Findings with evidence:
+  {{ findings_json }}

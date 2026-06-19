@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: orchestrasec
+          POSTGRES_PASSWORD: orchestrasec
+          POSTGRES_DB: orchestrasecai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests
+      - env:
+          DATABASE_URL: postgresql+asyncpg://orchestrasec:orchestrasec@localhost:5432/orchestrasecai
+          DATABASE_URL_SYNC: postgresql://orchestrasec:orchestrasec@localhost:5432/orchestrasecai
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET: ci-test-secret
+          MOCK_AI: "true"
+        run: alembic upgrade head && pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npm run lint
+      - env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+        run: npm run build
