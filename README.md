@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="docs/Gemini_Generated_Image_pa9wjvpa9wjvpa9w.pngbanner.png" alt="OrchestraSecAI — passive web security scanner" width="100%" />
+</p>
+# OrchestraSecAI
+
 # OrchestraSecAI
 
 Passive web security scanner — modular monolith with FastAPI, ARQ workers, Next.js UI, and optional vLLM-powered reports.
