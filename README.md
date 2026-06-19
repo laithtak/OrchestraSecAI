@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/Gemini_Generated_Image_pa9wjvpa9wjvpa9w.pngbanner.png" alt="OrchestraSecAI — passive web security scanner" width="100%" />
+  <img src="docs/Gemini_Generated_Image_pa9wjvpa9wjvpa9w.png" alt="OrchestraSecAI — passive web security scanner" width="100%" />
 </p>
 
 # OrchestraSecAI
