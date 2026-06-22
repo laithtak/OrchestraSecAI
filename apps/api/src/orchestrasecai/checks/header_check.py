@@ -5,7 +5,6 @@ from orchestrasecai.checks.base import CheckContext, CheckPhase, FindingDraft, S
 SECURITY_HEADERS = {
     "Strict-Transport-Security": ("header.missing_strict_transport_security", "medium"),
     "Content-Security-Policy": ("header.missing_content_security_policy", "medium"),
-    "X-Frame-Options": ("header.missing_x_frame_options", "low"),
     "X-Content-Type-Options": ("header.missing_x_content_type_options", "low"),
     "Referrer-Policy": ("header.missing_referrer_policy", "info"),
 }

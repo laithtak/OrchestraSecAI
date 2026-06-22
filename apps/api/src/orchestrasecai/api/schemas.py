@@ -87,7 +87,20 @@ class PolicyOut(BaseModel):
 class ScanCreate(BaseModel):
     scan_target_id: UUID
     scan_policy_id: UUID
-    plugin_ids: list[str] = Field(default_factory=lambda: ["header", "cookie", "tls", "disclosure"])
+    plugin_ids: list[str] = Field(
+        default_factory=lambda: [
+            "header",
+            "cookie",
+            "tls",
+            "disclosure",
+            "cors",
+            "tech_fingerprint",
+            "csp_quality",
+            "open_redirect",
+            "jwt",
+            "clickjacking",
+        ]
+    )
 
 
 class ScanOut(BaseModel):

@@ -154,9 +154,30 @@ async def run_scan(scan_id: str, request_id: str | None = None) -> None:
 
             checks_start = time.perf_counter()
             registry = build_registry()
-            checks = registry.get_many(scan.plugin_ids or ["header", "cookie", "tls", "disclosure"])
+            checks = registry.get_many(
+                scan.plugin_ids
+                or [
+                    "header",
+                    "cookie",
+                    "tls",
+                    "disclosure",
+                    "cors",
+                    "tech_fingerprint",
+                    "csp_quality",
+                    "open_redirect",
+                    "jwt",
+                    "clickjacking",
+                ]
+            )
             executor = CheckExecutor(registry)
-            ctx_base = CheckContext(scan_id=scan_id, org_id=str(scan.org_id))
+            scan_config = {
+                "enable_active_network_checks": any(
+                    p in (scan.plugin_ids or []) for p in ("subdomain_enum", "s3_exposure")
+                )
+            }
+            ctx_base = CheckContext(
+                scan_id=scan_id, org_id=str(scan.org_id), scan_config=scan_config
+            )
             seen_fps: set[str] = set()
             total_findings = 0
 
@@ -179,7 +200,9 @@ async def run_scan(scan_id: str, request_id: str | None = None) -> None:
 
             host = urlparse(target.base_url).hostname or ""
             if host:
-                host_ctx = CheckContext(scan_id=scan_id, org_id=str(scan.org_id))
+                host_ctx = CheckContext(
+                    scan_id=scan_id, org_id=str(scan.org_id), scan_config=scan_config
+                )
                 drafts, metrics = await executor.run_host_checks(checks, host_ctx, host)
                 total_findings += await _persist_findings(db, scan, drafts, seen_fps)
                 for plugin_id, m in metrics.items():

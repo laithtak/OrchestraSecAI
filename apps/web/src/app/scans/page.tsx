@@ -48,7 +48,18 @@ export default function ScansPage() {
       body: JSON.stringify({
         scan_target_id: targetId,
         scan_policy_id: policyId,
-        plugin_ids: ["header", "cookie", "tls", "disclosure"],
+        plugin_ids: [
+          "header",
+          "cookie",
+          "tls",
+          "disclosure",
+          "cors",
+          "tech_fingerprint",
+          "csp_quality",
+          "open_redirect",
+          "jwt",
+          "clickjacking",
+        ],
       }),
     });
     router.push(`/scans/${scan.id}`);
