@@ -8,6 +8,9 @@ Passive web security scanner — modular monolith with FastAPI, ARQ workers, Nex
 
 ## Quick start (Docker)
 
+The Compose quick start is a development environment. It intentionally uses development seed data,
+mock AI, and local service credentials; it is not a production deployment configuration.
+
 ```bash
 cd orchestrasecai
 cp .env.example .env
@@ -60,6 +63,21 @@ docker compose -f docker/compose/docker-compose.yml -f docker/compose/docker-com
 ```
 
 Set `MOCK_AI=false` and `VLLM_BASE_URL` to your inference endpoint.
+
+## Application environments
+
+`APP_ENV` accepts `development`, `test`, or `production` and defaults to `development`.
+Production mode refuses to start unless all of the following are true:
+
+- `JWT_SECRET` is not a published placeholder and is at least 32 bytes.
+- `DATABASE_URL` and `DATABASE_URL_SYNC` do not use the published development credentials.
+- `SEED_ENABLED=false` prevents automatic creation of the development owner account.
+- `MOCK_AI=false` uses a real OpenAI-compatible inference endpoint.
+- `CORS_ORIGINS` contains only explicit origins, not `*`.
+- `RATE_LIMIT_FAIL_OPEN=false` preserves rate limits when Redis is unavailable.
+
+Production validation is shared by the API, worker, and other processes that load application
+settings. Invalid configuration stops the process before it serves requests or executes jobs.
 
 ## Architecture
 

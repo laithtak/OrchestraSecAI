@@ -43,6 +43,7 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           JWT_SECRET: ci-test-secret
           MOCK_AI: "true"
+          APP_ENV: test
         run: alembic upgrade head && pytest -q
 
   web:

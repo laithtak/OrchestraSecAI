@@ -35,3 +35,4 @@ reports_storage/
 # OS
 .DS_Store
 Thumbs.db
+docs/

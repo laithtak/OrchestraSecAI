@@ -20,6 +20,8 @@ _seeded = False
 
 async def run_seed() -> None:
     global _seeded
+    if not _settings.seed_enabled:
+        return
     if _seeded:
         return
     async with _factory() as session:
