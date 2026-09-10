@@ -1,5 +1,6 @@
 from orchestrasecai.persistence.tables.audit import AuditLog
 from orchestrasecai.persistence.tables.core import (
+    AgentSession,
     AiAnalysis,
     CrawlPage,
     Finding,
@@ -21,6 +22,7 @@ __all__ = [
     "ScanTarget",
     "ScanPolicy",
     "Scan",
+    "AgentSession",
     "CrawlPage",
     "ScanCheckRun",
     "Finding",

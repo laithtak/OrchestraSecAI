@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str = ""
     trusted_proxy_depth: int = 0
 
+    agent_max_iterations: int = 10
+    agent_max_tools_per_plan: int = 8
+    nvd_api_base_url: str = "https://services.nvd.nist.gov/rest/json"
+    nvd_api_key: str = ""
+
     seed_admin_email: str = "admin@orchestrasec.local"
     seed_admin_password: str = "changeme123"
 

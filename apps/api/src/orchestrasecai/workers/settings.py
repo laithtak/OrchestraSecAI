@@ -5,7 +5,7 @@ from orchestrasecai.observability.logging import configure_logging, get_logger
 from orchestrasecai.observability.sentry import init_sentry
 from orchestrasecai.observability.tracing import init_tracing
 from orchestrasecai.workers.tasks.ai import run_ai_analysis_task
-from orchestrasecai.workers.tasks.scan import run_scan_task
+from orchestrasecai.workers.tasks.scan import run_agent_scan_task
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -34,7 +34,7 @@ async def on_job_end(ctx):
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions = [run_scan_task, run_ai_analysis_task]
+    functions = [run_agent_scan_task, run_ai_analysis_task]
     max_jobs = settings.worker_concurrency
     job_timeout = settings.scan_global_timeout_seconds
     on_startup = on_startup

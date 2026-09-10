@@ -12,6 +12,9 @@ type Scan = { id: string; status: string; stats: Record<string, number>; created
 type Target = { id: string; base_url: string };
 type Policy = { id: string; name: string };
 
+const DEFAULT_MISSION =
+  "Find CORS misconfigurations and chain to CSRF on login forms. Report header and cookie issues.";
+
 export default function ScansPage() {
   const router = useRouter();
   const [scans, setScans] = useState<Scan[]>([]);
@@ -19,6 +22,7 @@ export default function ScansPage() {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [targetId, setTargetId] = useState("");
   const [policyId, setPolicyId] = useState("");
+  const [mission, setMission] = useState(DEFAULT_MISSION);
 
   const load = () => {
     api<Scan[]>("/scans").then(setScans);
@@ -43,23 +47,13 @@ export default function ScansPage() {
   }, [router]);
 
   const startScan = async () => {
+    if (mission.trim().length < 10) return;
     const scan = await api<{ id: string }>("/scans", {
       method: "POST",
       body: JSON.stringify({
         scan_target_id: targetId,
         scan_policy_id: policyId,
-        plugin_ids: [
-          "header",
-          "cookie",
-          "tls",
-          "disclosure",
-          "cors",
-          "tech_fingerprint",
-          "csp_quality",
-          "open_redirect",
-          "jwt",
-          "clickjacking",
-        ],
+        mission: mission.trim(),
       }),
     });
     router.push(`/scans/${scan.id}`);
@@ -69,8 +63,12 @@ export default function ScansPage() {
     <DashboardShell>
       <h1 className="mb-6 text-2xl font-bold">Scans</h1>
       <Card className="mb-6">
-        <h2 className="mb-4 font-semibold">Start passive scan</h2>
-        <div className="flex gap-2">
+        <h2 className="mb-4 font-semibold">Start agent scan</h2>
+        <p className="mb-3 text-sm text-slate-600">
+          Describe what the agent should investigate. All scans run through the LangGraph
+          planner–executor–critic loop.
+        </p>
+        <div className="mb-3 flex flex-wrap gap-2">
           <select
             className="rounded border px-2"
             value={targetId}
@@ -82,10 +80,28 @@ export default function ScansPage() {
               </option>
             ))}
           </select>
-          <Button onClick={startScan} disabled={!targetId || !policyId}>
-            Run scan
-          </Button>
+          <select
+            className="rounded border px-2"
+            value={policyId}
+            onChange={(e) => setPolicyId(e.target.value)}
+          >
+            {policies.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
         </div>
+        <textarea
+          className="mb-3 w-full rounded border p-2 text-sm"
+          rows={4}
+          value={mission}
+          onChange={(e) => setMission(e.target.value)}
+          placeholder="Mission (min 10 characters)..."
+        />
+        <Button onClick={startScan} disabled={!targetId || !policyId || mission.trim().length < 10}>
+          Run agent scan
+        </Button>
       </Card>
       <div className="space-y-2">
         {scans.map((s) => (

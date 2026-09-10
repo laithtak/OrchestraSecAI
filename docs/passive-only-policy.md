@@ -1,39 +1,45 @@
-# Passive-Only Scanning Policy
+# Agent Scanning Policy
 
-OrchestraSecAI MVP enforces **observation-only** security assessment.
+OrchestraSecAI uses a **LangGraph agent orchestrator** for all scans. Operators provide a natural-language **mission**; the agent plans tool calls, executes them through a gated tool layer, and critiques results in a loop until complete or `max_iterations`.
 
-## Allowed activities
+## Scan flow
 
-| Activity | Method | Example |
-|----------|--------|---------|
-| Fetch pages | GET | Crawl linked HTML pages in scope |
-| Check headers | GET response | CSP, HSTS, X-Frame-Options |
-| Inspect cookies | Set-Cookie analysis | Secure, HttpOnly, SameSite |
-| TLS handshake | TCP + TLS | Protocol version, cert expiry |
-| Content patterns | Response body (truncated) | Email patterns, server banners |
+1. API creates scan + `agent_sessions` row with mission
+2. Worker runs `run_agent_scan_task` → Planner → Executor → Critic loop
+3. On completion, `run_ai_analysis_task` generates the report (unchanged)
 
-## Prohibited activities
+## Tool layer (mandatory gateway)
 
-- POST/PUT/PATCH/DELETE or any mutating HTTP method  
-- Form submission, login attempts, session riding  
-- Payload fuzzing, SQLi, XSS probes  
-- Port scanning beyond HTTPS (443) for declared web targets  
-- Brute force, credential stuffing, token guessing  
+All network I/O flows through `ScanToolLayer`. The agent never calls HTTP directly.
+
+| Tool | Engine | HTTP methods |
+|------|--------|--------------|
+| `passive_crawl` | `CrawlerEngine` | GET only |
+| `run_check` | `CheckExecutor` + plugins | GET (on-demand fetch) |
+| `active_probe` | `ActiveProbeEngine` | Technique-specific (POST allowed here only) |
+| `lookup_cve` | `CveLookupService` (NVD API) | Outbound to NVD |
+| `generate_poc` | `PocGenerator` (LLM) | No HTTP |
+
+## Passive vs active
+
+- **Crawler** remains passive-only (`assert_passive_method` enforces GET/HEAD).
+- **Mutating probes** (POST, form submission, CORS origin tests, etc.) run only via `active_probe` techniques registered in `ActiveProbeEngine`.
+- Every tool call writes an `audit_logs` entry with `action=agent.tool_call`.
 
 ## Enforcement
 
-1. **Code:** `assert_passive_method()` in crawler before each request  
-2. **Plugins:** Checks live only under `checks/`; plugins cannot import persistence  
-3. **AI prompts:** System instructions refuse exploitation guidance  
-4. **Operations:** Worker containers should not reach internal admin interfaces (network segmentation recommended for production)
+1. **Scope:** `scope.py` + `ssrf.py` validate URLs before any request
+2. **Rate limits:** Policy `requests_per_second` + org daily scan limit
+3. **Audit:** `{tool, technique, url, params_hash}` in metadata
+4. **Trace:** Reasoning stored in `agent_sessions.trace` JSONB (capped at 500 entries)
 
 ## Operator responsibilities
 
-- Obtain written authorization before scanning third-party sites  
-- Configure `scan_policies` with conservative `max_pages` and `requests_per_second`  
-- Review `verification_status`; MVP defaults to `unverified`  
+- Provide a clear, authorized mission (min 10 characters)
+- Configure conservative `scan_policies` (`max_pages`, `requests_per_second`)
+- Verify targets before scanning production systems
+- Review agent trace and findings before acting on PoC drafts
 
-## Phase 2
+## Deprecated
 
-- DNS TXT / HTML file domain verification before scan enqueue  
-- Optional WAF/CDN detection and scan pause  
+Linear `run_scan` (crawl → all plugins) is removed. `plugin_ids` on `POST /scans` is accepted but ignored.

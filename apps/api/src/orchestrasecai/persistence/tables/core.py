@@ -42,10 +42,18 @@ class ScanStatus(str, enum.Enum):
     queued = "queued"
     crawling = "crawling"
     scanning = "scanning"
+    agent_running = "agent_running"
     analyzing = "analyzing"
     completed = "completed"
     failed = "failed"
     cancelled = "cancelled"
+
+
+class AgentSessionStatus(str, enum.Enum):
+    running = "running"
+    complete = "complete"
+    failed = "failed"
+    max_iterations = "max_iterations"
 
 
 class Severity(str, enum.Enum):
@@ -144,7 +152,8 @@ class Scan(Base):
     scan_target_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scan_targets.id"), nullable=False)
     scan_policy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scan_policies.id"), nullable=False)
     status: Mapped[ScanStatus] = mapped_column(Enum(ScanStatus), default=ScanStatus.queued)
-    plugin_ids: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    plugin_ids: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True, default=list)
+    mission: Mapped[str] = mapped_column(Text, nullable=False, default="")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -154,6 +163,30 @@ class Scan(Base):
 
     target: Mapped["ScanTarget"] = relationship()
     policy: Mapped["ScanPolicy"] = relationship()
+    agent_session: Mapped["AgentSession | None"] = relationship(back_populates="scan", uselist=False)
+
+
+class AgentSession(Base):
+    __tablename__ = "agent_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id"), unique=True, nullable=False
+    )
+    mission: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[AgentSessionStatus] = mapped_column(
+        Enum(AgentSessionStatus), default=AgentSessionStatus.running
+    )
+    iteration: Mapped[int] = mapped_column(Integer, default=0)
+    max_iterations: Mapped[int] = mapped_column(Integer, nullable=False)
+    trace: Mapped[list] = mapped_column(JSONB, default=list)
+    summary: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    scan: Mapped["Scan"] = relationship(back_populates="agent_session")
 
 
 class CrawlPage(Base):

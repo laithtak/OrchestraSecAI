@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from orchestrasecai.api.deps import require_perm
-from orchestrasecai.api.schemas import ScanCreate, ScanOut, UserOut
+from orchestrasecai.api.schemas import AgentSessionOut, FindingOut, ScanCreate, ScanOut, UserOut
 from orchestrasecai.api.middleware.rate_limit import check_scan_daily_limit
 from orchestrasecai.observability.context import bind_context
 from orchestrasecai.observability.metrics import rate_limit_exceeded_total
@@ -20,6 +20,7 @@ from orchestrasecai.domain.verification import can_scan_unverified_target
 from orchestrasecai.config import get_settings
 from orchestrasecai.persistence.session import get_db
 from orchestrasecai.persistence.tables.core import (
+    AgentSession,
     CrawlPage,
     Finding,
     Scan,
@@ -29,6 +30,9 @@ from orchestrasecai.persistence.tables.core import (
     VerificationStatus,
 )
 from orchestrasecai.api.schemas import FindingOut
+from orchestrasecai.observability.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 _settings = get_settings()
@@ -38,7 +42,7 @@ async def _enqueue(scan_id: str, request_id: str | None = None) -> None:
     pool = await create_pool(RedisSettings.from_dsn(_settings.redis_url))
     await enqueue_with_context(
         pool,
-        "run_scan_task",
+        "run_agent_scan_task",
         scan_id,
         request_id=request_id,
     )
@@ -63,11 +67,13 @@ def _scan_out(s: Scan) -> ScanOut:
     return ScanOut(
         id=s.id,
         status=s.status.value,
+        mission=s.mission,
         created_at=s.created_at,
         stats=s.stats or {},
         links={
             "self": f"/api/v1/scans/{s.id}",
             "events": f"/api/v1/scans/{s.id}/events",
+            "agent_session": f"/api/v1/scans/{s.id}/agent-session",
         },
     )
 
@@ -96,15 +102,27 @@ async def create_scan(
             rate_limit_exceeded_total.labels(limiter="org_daily").inc()
             raise HTTPException(429, "Daily scan limit exceeded")
 
+    if body.plugin_ids is not None:
+        logger.warning("plugin_ids_deprecated", scan_target_id=str(body.scan_target_id))
+
     scan = Scan(
         org_id=user.org_id,
         scan_target_id=body.scan_target_id,
         scan_policy_id=body.scan_policy_id,
+        mission=body.mission,
         plugin_ids=body.plugin_ids,
         status=ScanStatus.queued,
         created_by=user.id,
     )
     db.add(scan)
+    await db.flush()
+
+    agent_session = AgentSession(
+        scan_id=scan.id,
+        mission=body.mission,
+        max_iterations=_settings.agent_max_iterations,
+    )
+    db.add(agent_session)
     await db.flush()
     bind_context(scan_id=str(scan.id), org_id=str(user.org_id))
     request.state.scan_id = scan.id
@@ -208,6 +226,30 @@ async def reanalyze(
     )
     await pool.aclose()
     return {"status": "queued"}
+
+
+@router.get("/{scan_id}/agent-session", response_model=AgentSessionOut)
+async def get_agent_session(
+    scan_id: UUID,
+    user: UserOut = Depends(require_perm("scans:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    s = await db.get(Scan, scan_id)
+    if not s or s.org_id != user.org_id:
+        raise HTTPException(404, "Scan not found")
+    r = await db.execute(select(AgentSession).where(AgentSession.scan_id == scan_id))
+    session = r.scalar_one_or_none()
+    if not session:
+        raise HTTPException(404, "Agent session not found")
+    bind_context(scan_id=str(scan_id))
+    return AgentSessionOut(
+        mission=session.mission,
+        status=session.status.value,
+        iteration=session.iteration,
+        max_iterations=session.max_iterations,
+        trace=session.trace or [],
+        summary=session.summary or {},
+    )
 
 
 @router.get("/{scan_id}/events")

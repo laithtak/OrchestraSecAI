@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from orchestrasecai.ai.client import LLMClient, load_prompt
 from orchestrasecai.ai.embeddings import find_similar, upsert_finding_embedding
 from orchestrasecai.config import get_settings
-from orchestrasecai.domain.services.scan_runner import publish_event
+from orchestrasecai.domain.services.event_bus import publish_event
 from orchestrasecai.persistence.tables import AiAnalysis, Finding, Report, Scan
 from orchestrasecai.persistence.tables.core import ReportFormat, ScanStatus
 

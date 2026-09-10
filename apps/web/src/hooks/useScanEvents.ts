@@ -9,6 +9,12 @@ export type ScanEvent = {
   status?: string;
   url?: string;
   finding_id?: string;
+  tool?: string;
+  success?: boolean;
+  iteration?: number;
+  reasoning?: string;
+  calls_count?: number;
+  complete?: boolean;
 };
 
 export function useScanEvents(scanId: string | null) {
@@ -22,7 +28,6 @@ export function useScanEvents(scanId: string | null) {
       `${API_URL}/api/v1/scans/${scanId}/events?token=${token}`
     );
 
-    // EventSource doesn't support Authorization header — use fetch stream fallback
     let cancelled = false;
 
     async function connect() {
@@ -45,7 +50,7 @@ export function useScanEvents(scanId: string | null) {
           if (dataLine) {
             try {
               const data = JSON.parse(dataLine[1]);
-              const ev: ScanEvent = { event: eventLine?.[1] || "update", ...data };
+              const ev: ScanEvent = { event: eventLine?.[1] || data.event || "update", ...data };
               setEvents((prev) => [...prev.slice(-49), ev]);
               if (data.status) setStatus(data.status);
             } catch {

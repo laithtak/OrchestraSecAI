@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { AgentTrace, TraceEntry } from "@/components/agent/AgentTrace";
 import { DashboardShell } from "@/components/layout/DashboardShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { useScanEvents } from "@/hooks/useScanEvents";
 type Scan = {
   id: string;
   status: string;
+  mission?: string;
   stats: Record<string, number>;
   error_message?: string;
 };
@@ -22,16 +24,29 @@ type Finding = {
   plugin_id: string;
 };
 
+type AgentSession = {
+  mission: string;
+  status: string;
+  iteration: number;
+  max_iterations: number;
+  trace: TraceEntry[];
+  summary: Record<string, unknown>;
+};
+
 export default function ScanDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [scan, setScan] = useState<Scan | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [agentSession, setAgentSession] = useState<AgentSession | null>(null);
   const { events, status: eventStatus } = useScanEvents(id);
 
   const load = useCallback(() => {
     api<Scan>(`/scans/${id}`).then(setScan);
     api<Finding[]>(`/scans/${id}/findings`).then(setFindings);
+    api<AgentSession>(`/scans/${id}/agent-session`)
+      .then(setAgentSession)
+      .catch(() => setAgentSession(null));
   }, [id]);
 
   useEffect(() => {
@@ -52,6 +67,8 @@ export default function ScanDetailPage() {
     const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     window.open(`${base}${url}`, "_blank");
   };
+
+  const agentEvents = events.filter((e) => e.event.startsWith("agent."));
 
   return (
     <DashboardShell>
@@ -76,14 +93,28 @@ export default function ScanDetailPage() {
           View HTML report
         </Button>
       )}
+      <AgentTrace
+        trace={agentSession?.trace ?? []}
+        mission={agentSession?.mission ?? scan?.mission}
+        iteration={agentSession?.iteration}
+        maxIterations={agentSession?.max_iterations}
+        status={agentSession?.status}
+      />
       <Card className="mb-6">
         <h2 className="mb-2 font-semibold">Live events</h2>
         <ul className="max-h-40 overflow-y-auto text-xs font-mono">
-          {events.map((e, i) => (
+          {agentEvents.map((e, i) => (
             <li key={i}>
-              {e.event} {e.status || e.url || ""}
+              {e.event} {e.tool || e.status || e.reasoning?.slice(0, 40) || ""}
             </li>
           ))}
+          {events
+            .filter((e) => !e.event.startsWith("agent."))
+            .map((e, i) => (
+              <li key={`o-${i}`}>
+                {e.event} {e.status || e.url || ""}
+              </li>
+            ))}
         </ul>
       </Card>
       <Card>

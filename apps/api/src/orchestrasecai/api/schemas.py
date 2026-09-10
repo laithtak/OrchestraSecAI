@@ -87,25 +87,26 @@ class PolicyOut(BaseModel):
 class ScanCreate(BaseModel):
     scan_target_id: UUID
     scan_policy_id: UUID
-    plugin_ids: list[str] = Field(
-        default_factory=lambda: [
-            "header",
-            "cookie",
-            "tls",
-            "disclosure",
-            "cors",
-            "tech_fingerprint",
-            "csp_quality",
-            "open_redirect",
-            "jwt",
-            "clickjacking",
-        ]
+    mission: str = Field(..., min_length=10, max_length=4000)
+    plugin_ids: list[str] | None = Field(
+        default=None,
+        description="Deprecated — agent selects plugins dynamically",
     )
+
+
+class AgentSessionOut(BaseModel):
+    mission: str
+    status: str
+    iteration: int
+    max_iterations: int
+    trace: list = Field(default_factory=list)
+    summary: dict = Field(default_factory=dict)
 
 
 class ScanOut(BaseModel):
     id: UUID
     status: str
+    mission: str | None = None
     created_at: datetime
     stats: dict = Field(default_factory=dict)
     links: dict | None = None
