@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from langgraph.graph import END, StateGraph
 
@@ -11,7 +11,9 @@ from orchestrasecai.agent.nodes.critic import critic_node
 from orchestrasecai.agent.nodes.executor import executor_node
 from orchestrasecai.agent.nodes.planner import planner_node
 from orchestrasecai.agent.state import AgentState
-from orchestrasecai.scanner.tools.layer import ScanToolLayer
+
+if TYPE_CHECKING:
+    from orchestrasecai.scanner.tools.layer import ScanToolLayer
 
 
 def _merge_trace(existing: list[dict], new: list[dict]) -> list[dict]:
