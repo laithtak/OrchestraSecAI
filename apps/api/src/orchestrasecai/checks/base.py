@@ -20,6 +20,7 @@ class FindingDraft:
     location: dict[str, Any] = field(default_factory=dict)
     evidence: list[dict[str, Any]] = field(default_factory=list)
     cvss_estimate: float | None = None
+    remediation: str | None = None
 
 
 @dataclass

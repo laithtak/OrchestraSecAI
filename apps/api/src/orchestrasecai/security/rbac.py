@@ -4,6 +4,7 @@ ROLE_PERMISSIONS: dict[UserRole, set[str]] = {
     UserRole.owner: {
         "scans:read",
         "scans:write",
+        "scans:active",
         "targets:read",
         "targets:write",
         "projects:read",
@@ -20,6 +21,7 @@ ROLE_PERMISSIONS: dict[UserRole, set[str]] = {
     UserRole.admin: {
         "scans:read",
         "scans:write",
+        "scans:active",
         "targets:read",
         "targets:write",
         "projects:read",

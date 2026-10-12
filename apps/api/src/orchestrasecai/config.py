@@ -48,6 +48,26 @@ class Settings(BaseSettings):
 
     worker_concurrency: int = 2
     scan_global_timeout_seconds: int = 1800
+    # Durable scan lifecycle (see docs/scan-lifecycle.md).
+    scan_max_attempts: int = 2
+    scan_lease_seconds: int = 120
+    scan_heartbeat_seconds: int = 20
+    scan_requeue_after_seconds: int = 120
+    scan_queue_max_age_seconds: int = 3600
+    # Per-scan network budgets enforced by the egress transport.
+    scan_max_requests: int = 2000
+    scan_max_response_bytes: int = 1_000_000
+    # Active (non-passive) probes require this deployment flag AND a per-scan opt-in
+    # by a user holding the scans:active permission on a verified target.
+    active_probes_allowed: bool = False
+
+    # Domain ownership verification (DNS TXT challenge).
+    domain_verification_challenge_ttl_hours: int = 72
+    domain_verification_max_age_days: int = 30
+    domain_verification_check_cooldown_seconds: int = 10
+    domain_verification_dns_timeout_seconds: float = 5.0
+    # Optional comma-separated resolver IPs; empty uses the system resolver configuration.
+    domain_verification_nameservers: str = ""
 
     vllm_base_url: str = "http://localhost:8000/v1"
     vllm_model: str = "meta-llama/Llama-3.1-8B-Instruct"
@@ -83,6 +103,12 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def domain_verification_nameserver_list(self) -> list[str]:
+        return [
+            ns.strip() for ns in self.domain_verification_nameservers.split(",") if ns.strip()
+        ]
 
 
 def _uses_development_database_credentials(value: str) -> bool:
@@ -125,6 +151,12 @@ def validate_production_safety(settings: Settings) -> None:
         violations.append("CORS_ORIGINS must not contain '*' in production.")
     if settings.rate_limit_fail_open:
         violations.append("RATE_LIMIT_FAIL_OPEN must be false in production.")
+    if settings.scan_max_attempts < 1 or settings.scan_max_attempts > 5:
+        violations.append("SCAN_MAX_ATTEMPTS must be between 1 and 5 in production.")
+    if settings.scan_lease_seconds <= settings.scan_heartbeat_seconds * 2:
+        violations.append(
+            "SCAN_LEASE_SECONDS must exceed twice SCAN_HEARTBEAT_SECONDS in production."
+        )
 
     if violations:
         details = "\n".join(f"- {message}" for message in violations)

@@ -1,3 +1,4 @@
+from arq import cron
 from arq.connections import RedisSettings
 
 from orchestrasecai.config import get_settings
@@ -5,7 +6,7 @@ from orchestrasecai.observability.logging import configure_logging, get_logger
 from orchestrasecai.observability.sentry import init_sentry
 from orchestrasecai.observability.tracing import init_tracing
 from orchestrasecai.workers.tasks.ai import run_ai_analysis_task
-from orchestrasecai.workers.tasks.scan import run_agent_scan_task
+from orchestrasecai.workers.tasks.scan import reap_stale_scans_task, run_agent_scan_task
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -34,9 +35,13 @@ async def on_job_end(ctx):
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions = [run_agent_scan_task, run_ai_analysis_task]
+    functions = (run_agent_scan_task, run_ai_analysis_task)
+    cron_jobs = (cron(reap_stale_scans_task, second=0, run_at_startup=True, unique=True),)
     max_jobs = settings.worker_concurrency
-    job_timeout = settings.scan_global_timeout_seconds
+    # The scan enforces its own deadline (and records timed_out); the ARQ timeout is a
+    # backstop slightly above it.
+    job_timeout = settings.scan_global_timeout_seconds + 120
+    max_tries = settings.scan_max_attempts
     on_startup = on_startup
     on_shutdown = on_shutdown
     on_job_start = on_job_start

@@ -1,3 +1,13 @@
+"""Optional AI enrichment for completed scans.
+
+AI output is interpretation, not evidence. This pipeline:
+* never changes scan status, findings or evidence;
+* records every analysis (including failures) in ``ai_analyses`` with model/prompt;
+* validates model output that references findings against the scan's real findings;
+* re-renders the deterministic report with a separately labelled AI section.
+If the model is unavailable the deterministic report generated at completion stands.
+"""
+
 import json
 from datetime import UTC, datetime
 from uuid import UUID
@@ -9,11 +19,16 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from orchestrasecai.ai.client import LLMClient, load_prompt
 from orchestrasecai.ai.embeddings import find_similar, upsert_finding_embedding
 from orchestrasecai.config import get_settings
+from orchestrasecai.domain.reporting import store_report
 from orchestrasecai.domain.services.event_bus import publish_event
-from orchestrasecai.persistence.tables import AiAnalysis, Finding, Report, Scan
-from orchestrasecai.persistence.tables.core import ReportFormat, ScanStatus
+from orchestrasecai.observability.logging import get_logger
+from orchestrasecai.persistence.tables import AiAnalysis, Finding, Scan
+from orchestrasecai.persistence.tables.core import ScanStatus
 
 settings = get_settings()
+logger = get_logger(__name__)
+ENRICHABLE_STATES = (ScanStatus.completed, ScanStatus.timed_out)
+PIPELINES = ("explain", "prioritize", "executive_summary", "technical_report")
 
 
 def _render_prompt(prompt_cfg: dict, **kwargs) -> tuple[str, str]:
@@ -22,112 +37,118 @@ def _render_prompt(prompt_cfg: dict, **kwargs) -> tuple[str, str]:
     return system, user
 
 
-async def run_full_ai_pipeline(scan_id: str) -> None:
-    engine = create_async_engine(settings.database_url)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    llm = LLMClient()
+def _sanitize(analysis_type: str, result: dict, finding_ids: set[str]) -> dict:
+    """Drop model claims that reference findings which do not exist in this scan."""
+    if analysis_type == "prioritize" and isinstance(result.get("ranked_ids"), list):
+        result = {
+            **result,
+            "ranked_ids": [i for i in result["ranked_ids"] if str(i) in finding_ids],
+        }
+    return result
 
-    async with session_factory() as db:
-        scan = await db.get(Scan, UUID(scan_id))
-        if not scan:
-            return
-        result = await db.execute(select(Finding).where(Finding.scan_id == scan.id))
-        findings = list(result.scalars().all())
 
-        findings_data = [
-            {
-                "id": str(f.id),
-                "plugin_id": f.plugin_id,
-                "severity": f.severity,
-                "title": f.title,
-                "description": f.description,
-                "location": f.location,
-            }
-            for f in findings
-        ]
-        findings_json = json.dumps(findings_data, indent=2)
+async def run_full_ai_pipeline(scan_id: str, *, session_factory=None, llm=None) -> str:
+    engine = None
+    factory = session_factory
+    if factory is None:
+        engine = create_async_engine(settings.database_url)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+    llm = llm or LLMClient()
+    model_name = "mock" if settings.mock_ai else settings.vllm_model
 
-        for f in findings:
-            text = f"{f.title} {f.description} {f.plugin_id}"
-            await upsert_finding_embedding(str(scan.org_id), str(f.id), text)
-            similar = await find_similar(str(scan.org_id), text)
-            if similar:
-                f.location = {**f.location, "similar_findings": similar}
-
-        pipelines = [
-            ("explain", "explain"),
-            ("prioritize", "prioritize"),
-            ("executive_summary", "executive_summary"),
-            ("technical_report", "technical_report"),
-        ]
-        analysis_results: dict[str, dict] = {}
-
-        for folder, analysis_type in pipelines:
-            cfg = load_prompt(folder)
-            system, user = _render_prompt(
-                cfg,
-                findings_json=findings_json,
-                stats_json=json.dumps(scan.stats or {}),
+    try:
+        async with factory() as db:
+            scan = await db.get(Scan, UUID(scan_id))
+            if not scan or scan.status not in ENRICHABLE_STATES:
+                return "skipped"
+            result = await db.execute(select(Finding).where(Finding.scan_id == scan.id))
+            findings = list(result.scalars().all())
+            finding_ids = {str(f.id) for f in findings}
+            findings_json = json.dumps(
+                [
+                    {
+                        "id": str(f.id),
+                        "plugin_id": f.plugin_id,
+                        "severity": getattr(f.severity, "value", f.severity),
+                        "title": f.title,
+                        "description": f.description,
+                        "location": f.location,
+                    }
+                    for f in findings
+                ],
+                indent=2,
             )
-            result_data = await llm.complete(system, user)
-            analysis_results[analysis_type] = result_data
-            db.add(
-                AiAnalysis(
-                    scan_id=scan.id,
-                    analysis_type=analysis_type,
-                    model_name=settings.vllm_model if not settings.mock_ai else "mock",
-                    prompt_version=cfg.get("version", "v1"),
-                    result=result_data,
+
+            similar: dict[str, list] = {}
+            try:
+                for f in findings:
+                    text = f"{f.title} {f.description} {f.plugin_id}"
+                    await upsert_finding_embedding(str(scan.org_id), str(f.id), text)
+                    matches = await find_similar(str(scan.org_id), text)
+                    if matches:
+                        similar[str(f.id)] = matches
+            except Exception as exc:  # noqa: BLE001 - embeddings are optional enrichment
+                logger.warning("ai_embeddings_failed", error_type=type(exc).__name__)
+
+            analyses: dict[str, dict] = {}
+            for analysis_type in PIPELINES:
+                cfg = load_prompt(analysis_type)
+                system, user = _render_prompt(
+                    cfg, findings_json=findings_json, stats_json=json.dumps(scan.stats or {})
                 )
-            )
-            await publish_event(
-                scan_id,
-                "ai.analysis_completed",
-                {"analysis_type": analysis_type},
-            )
+                status = "completed"
+                try:
+                    data = await llm.complete(system, user)
+                    if not isinstance(data, dict):
+                        raise TypeError("non-object model output")
+                    data = _sanitize(analysis_type, data, finding_ids)
+                    analyses[analysis_type] = data
+                except Exception as exc:  # noqa: BLE001 - one failed analysis is not fatal
+                    status = "failed"
+                    data = {"error": "model_unavailable", "error_type": type(exc).__name__}
+                    logger.warning(
+                        "ai_analysis_failed",
+                        analysis_type=analysis_type,
+                        error_type=type(exc).__name__,
+                    )
+                db.add(
+                    AiAnalysis(
+                        scan_id=scan.id,
+                        analysis_type=analysis_type,
+                        model_name=model_name,
+                        prompt_version=cfg.get("version", "v1"),
+                        result=data,
+                        status=status,
+                    )
+                )
+            if similar:
+                db.add(
+                    AiAnalysis(
+                        scan_id=scan.id,
+                        analysis_type="similar_findings",
+                        model_name="embeddings",
+                        prompt_version="n/a",
+                        result=similar,
+                        status="completed",
+                    )
+                )
+            await db.flush()
 
-        html = _render_html_report(scan, findings, analysis_results)
-        json_report = json.dumps(
-            {
-                "scan_id": str(scan.id),
-                "generated_at": datetime.now(UTC).isoformat(),
-                "stats": scan.stats,
-                "findings": findings_data,
-                "ai": analysis_results,
-            },
-            indent=2,
+            if analyses:
+                await store_report(
+                    db,
+                    scan,
+                    ai_enrichment={
+                        "model": model_name,
+                        "generated_at": datetime.now(UTC).isoformat(),
+                        "analyses": analyses,
+                    },
+                )
+            await db.commit()
+        await publish_event(
+            scan_id, "ai.analysis_completed", {"analyses": sorted(analyses.keys())}
         )
-        db.add(Report(scan_id=scan.id, format=ReportFormat.html, content=html, version=1))
-        db.add(Report(scan_id=scan.id, format=ReportFormat.json, content=json_report, version=1))
-
-        scan.status = ScanStatus.completed
-        scan.finished_at = datetime.now(UTC)
-        await db.commit()
-        await publish_event(scan_id, "scan.status_changed", {"status": "completed"})
-
-    await engine.dispose()
-
-
-def _render_html_report(scan: Scan, findings: list, ai: dict) -> str:
-    exec_summary = ai.get("executive_summary", {})
-    tech = ai.get("technical_report", {})
-    rows = "".join(
-        f"<tr><td>{f.severity.value if hasattr(f.severity, 'value') else f.severity}</td><td>{f.title}</td><td>{f.plugin_id}</td></tr>"
-        for f in findings
-    )
-    return f"""<!DOCTYPE html>
-<html><head><title>OrchestraSecAI Report - {scan.id}</title>
-<style>body{{font-family:sans-serif;margin:2rem}}table{{border-collapse:collapse;width:100%}}
-td,th{{border:1px solid #ccc;padding:8px}}</style></head>
-<body>
-<h1>OrchestraSecAI Security Report</h1>
-<p><strong>Scan ID:</strong> {scan.id}</p>
-<p><strong>Status:</strong> {scan.status}</p>
-<p><em>Passive-only scan. Findings require authorized remediation.</em></p>
-<h2>Executive Summary</h2>
-<p>{exec_summary.get('executive_summary', 'N/A')}</p>
-<h2>Findings</h2>
-<table><tr><th>Severity</th><th>Title</th><th>Plugin</th></tr>{rows}</table>
-<h2>Technical Report</h2>
-<pre>{tech.get('technical_report', 'N/A')}</pre>
-</body></html>"""
+        return "enriched" if analyses else "ai_unavailable"
+    finally:
+        if engine is not None:
+            await engine.dispose()

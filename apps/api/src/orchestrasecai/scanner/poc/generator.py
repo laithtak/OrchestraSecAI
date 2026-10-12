@@ -1,4 +1,9 @@
-"""PoC draft generator using LLM structured output."""
+"""PoC draft generator using LLM output.
+
+Drafts are untrusted generated content: they are stored as AI analyses (never as
+scanner evidence), are never executed, and are only produced for findings that belong
+to the requesting scan.
+"""
 
 from __future__ import annotations
 
@@ -9,15 +14,29 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from orchestrasecai.ai.client import LLMClient
-from orchestrasecai.persistence.tables.core import Finding, FindingEvidence
+from orchestrasecai.config import get_settings
+from orchestrasecai.persistence.tables.core import AiAnalysis, Finding, FindingEvidence, Scan
+
+PROMPT_VERSION = "poc_draft/inline-v1"
+
+
+def _text(value: Any, limit: int) -> str:
+    return str(value)[:limit] if value is not None else ""
 
 
 class PocGenerator:
     def __init__(self, llm: LLMClient | None = None) -> None:
         self.llm = llm or LLMClient()
 
-    async def generate(self, db: AsyncSession, finding_id: UUID) -> dict[str, Any]:
-        finding = await db.get(Finding, finding_id)
+    async def generate(self, db: AsyncSession, scan: Scan, finding_id: UUID) -> dict[str, Any]:
+        r = await db.execute(
+            select(Finding).where(
+                Finding.id == finding_id,
+                Finding.scan_id == scan.id,
+                Finding.org_id == scan.org_id,
+            )
+        )
+        finding = r.scalar_one_or_none()
         if not finding:
             raise ValueError("Finding not found")
 
@@ -39,18 +58,25 @@ class PocGenerator:
             f"Evidence: {evidence}"
         )
         result = await self.llm.complete(system, user)
-
+        steps = result.get("steps")
         poc_payload = {
-            "curl_command": result.get("curl_command", f"curl -i '{finding.location.get('url', '')}'"),
-            "httpie_command": result.get("httpie_command", ""),
-            "steps": result.get("steps", ["Review finding evidence and reproduce manually."]),
+            "finding_id": str(finding_id),
+            "curl_command": _text(result.get("curl_command"), 2000),
+            "httpie_command": _text(result.get("httpie_command"), 2000),
+            "steps": [_text(s, 500) for s in steps[:20]]
+            if isinstance(steps, list)
+            else ["Review finding evidence and reproduce manually."],
+            "untrusted_generated_content": True,
         }
-
+        settings = get_settings()
         db.add(
-            FindingEvidence(
-                finding_id=finding_id,
-                evidence_type="poc_draft",
-                payload=poc_payload,
+            AiAnalysis(
+                scan_id=scan.id,
+                analysis_type="poc_draft",
+                model_name="mock" if settings.mock_ai else settings.vllm_model,
+                prompt_version=PROMPT_VERSION,
+                result=poc_payload,
+                status="completed",
             )
         )
         await db.flush()
