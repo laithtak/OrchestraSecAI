@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 
 class TokenResponse(BaseModel):
@@ -11,8 +11,10 @@ class TokenResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
+    # Login looks up an existing account; it must not apply deliverability rules that
+    # reject valid identifiers such as the development seed's special-use .local domain.
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., max_length=1024)
 
 
 class RefreshRequest(BaseModel):
