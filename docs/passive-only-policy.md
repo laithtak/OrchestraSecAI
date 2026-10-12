@@ -1,45 +1,64 @@
-# Agent Scanning Policy
+# Scan Execution Policy
 
-OrchestraSecAI uses a **LangGraph agent orchestrator** for all scans. Operators provide a natural-language **mission**; the agent plans tool calls, executes them through a gated tool layer, and critiques results in a loop until complete or `max_iterations`.
+OrchestraSecAI uses a **LangGraph agent orchestrator** for all scans. Operators provide a
+natural-language **mission**; the agent plans tool calls, the executor runs them through
+the gated tool layer, and a critic decides whether to iterate (bounded by
+`AGENT_MAX_ITERATIONS` and `AGENT_MAX_TOOLS_PER_PLAN`).
 
-## Scan flow
-
-1. API creates scan + `agent_sessions` row with mission
-2. Worker runs `run_agent_scan_task` → Planner → Executor → Critic loop
-3. On completion, `run_ai_analysis_task` generates the report (unchanged)
+Scans run only against targets whose ownership was proven with a DNS TXT challenge; see
+[scan-lifecycle.md](./scan-lifecycle.md).
 
 ## Tool layer (mandatory gateway)
 
-All network I/O flows through `ScanToolLayer`. The agent never calls HTTP directly.
+The agent never performs network I/O itself. `ScanToolLayer` validates and executes:
 
-| Tool | Engine | HTTP methods |
-|------|--------|--------------|
-| `passive_crawl` | `CrawlerEngine` | GET only |
-| `run_check` | `CheckExecutor` + plugins | GET (on-demand fetch) |
-| `active_probe` | `ActiveProbeEngine` | Technique-specific (POST allowed here only) |
-| `lookup_cve` | `CveLookupService` (NVD API) | Outbound to NVD |
-| `generate_poc` | `PocGenerator` (LLM) | No HTTP |
+| Tool | Engine | HTTP behaviour |
+|------|--------|----------------|
+| `passive_crawl` | `CrawlerEngine` | GET/HEAD, in scope, policy-clamped limits |
+| `run_check` | `CheckExecutor` + PAGE-phase plugins | GET (on-demand fetch) or crawled page |
+| `active_probe` | `ActiveProbeEngine` | Technique-specific, only when authorized for the scan |
+| `lookup_cve` | `CveLookupService` (NVD API) | Outbound to the configured NVD endpoint only |
+| `generate_poc` | `PocGenerator` (LLM) | No HTTP; draft stored as AI output, never executed |
 
-## Passive vs active
+All target traffic from these tools goes through the egress transport
+(`security/egress.py`): scope, method allowlist, request budget, public-only DNS with
+connection pinning, redirect-hop validation and body caps.
 
-- **Crawler** remains passive-only (`assert_passive_method` enforces GET/HEAD).
-- **Mutating probes** (POST, form submission, CORS origin tests, etc.) run only via `active_probe` techniques registered in `ActiveProbeEngine`.
-- Every tool call writes an `audit_logs` entry with `action=agent.tool_call`.
+## Passive by default
 
-## Enforcement
+- The crawler and checks are passive (`assert_passive_method` and the transport method
+  allowlist enforce GET/HEAD).
+- Active techniques (`cors_origin_test`, `open_redirect_follow`, `reflected_xss_check`,
+  `cookie_flags_probe`, and `csrf_form_probe`, which sends a fixed inert POST body) run
+  only when **all** hold:
+  1. the deployment sets `ACTIVE_PROBES_ALLOWED=true`;
+  2. the scan was created with `allow_active_probes=true` by a user holding
+     `scans:active` (owner/admin) — audited as `scan.active_probes_opt_in`;
+  3. it is the scan's first execution attempt (never replayed during crash recovery).
+- Model-supplied probe parameters are validated against strict patterns; request bodies
+  are fixed by the technique, not by the model.
 
-1. **Scope:** `scope.py` + `ssrf.py` validate URLs before any request
-2. **Rate limits:** Policy `requests_per_second` + org daily scan limit
-3. **Audit:** `{tool, technique, url, params_hash}` in metadata
-4. **Trace:** Reasoning stored in `agent_sessions.trace` JSONB (capped at 500 entries)
+## Enforcement summary
+
+1. **Authorization:** verified, unexpired ownership of the exact hostname, checked by the
+   API and again by the worker at execution time.
+2. **Scope:** exact host + explicit subdomains; redirects to other hosts are refused.
+3. **SSRF:** all resolved addresses must be public; connections are pinned.
+4. **Budgets:** policy pages/depth/RPS, per-scan request budget, response cap, agent
+   iteration/tool limits, global deadline.
+5. **Audit:** `agent.tool_call` / `agent.tool_denied` entries with tool, reason and a
+   parameter hash for active probes; lifecycle events (`scan.create`, `scan.cancel`,
+   `scan.completed`, `scan.execution_denied`, …).
+6. **Trace:** reasoning in `agent_sessions.trace` (capped at 500 entries).
 
 ## Operator responsibilities
 
-- Provide a clear, authorized mission (min 10 characters)
-- Configure conservative `scan_policies` (`max_pages`, `requests_per_second`)
-- Verify targets before scanning production systems
-- Review agent trace and findings before acting on PoC drafts
+- Only register domains you own or are authorized in writing to test.
+- Keep scan policies conservative (`max_pages`, `requests_per_second`, blocked paths such
+  as `/logout`).
+- Review findings and the agent trace before acting on AI enrichment or PoC drafts.
 
 ## Deprecated
 
-Linear `run_scan` (crawl → all plugins) is removed. `plugin_ids` on `POST /scans` is accepted but ignored.
+The linear `run_scan` (crawl → all plugins) is removed. `plugin_ids` on `POST /scans` is
+accepted but ignored.
