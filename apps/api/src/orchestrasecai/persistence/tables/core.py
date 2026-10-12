@@ -20,6 +20,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from orchestrasecai.persistence.base import Base
 
 
+def _str_enum(enum_cls: type[enum.Enum]) -> Enum:
+    # Migrations store enum columns as VARCHAR; a native PG ENUM binding would emit
+    # casts to types that do not exist in the deployed schema.
+    return Enum(enum_cls, native_enum=False, length=50, create_constraint=False)
+
+
 class PlanType(str, enum.Enum):
     free = "free"
     pro = "pro"
@@ -81,7 +87,7 @@ class Organization(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    plan: Mapped[PlanType] = mapped_column(Enum(PlanType), default=PlanType.free)
+    plan: Mapped[PlanType] = mapped_column(_str_enum(PlanType), default=PlanType.free)
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -97,7 +103,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.analyst)
+    role: Mapped[UserRole] = mapped_column(_str_enum(UserRole), default=UserRole.analyst)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -121,7 +127,7 @@ class ScanTarget(Base):
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     allowed_hosts: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     verification_status: Mapped[VerificationStatus] = mapped_column(
-        Enum(VerificationStatus), default=VerificationStatus.unverified
+        _str_enum(VerificationStatus), default=VerificationStatus.unverified
     )
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -151,8 +157,8 @@ class Scan(Base):
     org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), nullable=False)
     scan_target_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scan_targets.id"), nullable=False)
     scan_policy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scan_policies.id"), nullable=False)
-    status: Mapped[ScanStatus] = mapped_column(Enum(ScanStatus), default=ScanStatus.queued)
-    plugin_ids: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True, default=list)
+    status: Mapped[ScanStatus] = mapped_column(_str_enum(ScanStatus), default=ScanStatus.queued)
+    plugin_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True, default=list)
     mission: Mapped[str] = mapped_column(Text, nullable=False, default="")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -175,7 +181,7 @@ class AgentSession(Base):
     )
     mission: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[AgentSessionStatus] = mapped_column(
-        Enum(AgentSessionStatus), default=AgentSessionStatus.running
+        _str_enum(AgentSessionStatus), default=AgentSessionStatus.running
     )
     iteration: Mapped[int] = mapped_column(Integer, default=0)
     max_iterations: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -225,13 +231,13 @@ class Finding(Base):
     scan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scans.id"), nullable=False)
     org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), nullable=False)
     plugin_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    severity: Mapped[Severity] = mapped_column(Enum(Severity), nullable=False)
+    severity: Mapped[Severity] = mapped_column(_str_enum(Severity), nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     location: Mapped[dict] = mapped_column(JSONB, default=dict)
     cvss_estimate: Mapped[float | None] = mapped_column(Numeric(3, 1), nullable=True)
-    status: Mapped[FindingStatus] = mapped_column(Enum(FindingStatus), default=FindingStatus.open)
+    status: Mapped[FindingStatus] = mapped_column(_str_enum(FindingStatus), default=FindingStatus.open)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     evidence: Mapped[list["FindingEvidence"]] = relationship(back_populates="finding")
@@ -267,7 +273,7 @@ class Report(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     scan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scans.id"), nullable=False)
-    format: Mapped[ReportFormat] = mapped_column(Enum(ReportFormat), nullable=False)
+    format: Mapped[ReportFormat] = mapped_column(_str_enum(ReportFormat), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
