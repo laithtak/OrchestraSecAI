@@ -45,7 +45,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       </header>
       <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
       <footer className="mx-auto max-w-6xl px-4 pb-8 text-xs text-amber-700">
-        Passive-only scanner. Only scan targets you are authorized to test. Domain verification pending.
+        Scans run only against DNS-verified targets, limited to the verified hostname. Active probes are off unless explicitly enabled per scan.
       </footer>
     </div>
   );

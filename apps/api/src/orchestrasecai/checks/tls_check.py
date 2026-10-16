@@ -1,6 +1,6 @@
 import hashlib
-import ssl
 import socket
+import ssl
 from datetime import UTC, datetime
 
 from orchestrasecai.checks.base import CheckContext, CheckPhase, FindingDraft, SecurityCheck
@@ -10,7 +10,7 @@ class TLSCheck(SecurityCheck):
     plugin_id = "tls"
     name = "TLS Configuration Check"
     phase = CheckPhase.HOST
-    aliases = ["tls"]
+    aliases = ("tls",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.host:
@@ -29,11 +29,13 @@ class TLSCheck(SecurityCheck):
 
     def _sync_probe(self, hostname: str) -> dict:
         ctx = ssl.create_default_context()
-        with socket.create_connection((hostname, 443), timeout=10) as sock:
-            with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
-                cert = ssock.getpeercert()
-                cipher = ssock.cipher()
-                version = ssock.version()
+        with (
+            socket.create_connection((hostname, 443), timeout=10) as sock,
+            ctx.wrap_socket(sock, server_hostname=hostname) as ssock,
+        ):
+            cert = ssock.getpeercert()
+            cipher = ssock.cipher()
+            version = ssock.version()
         not_after = cert.get("notAfter")
         expiry = None
         if not_after:

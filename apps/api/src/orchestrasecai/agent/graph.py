@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from langgraph.graph import END, StateGraph
 
@@ -11,7 +11,9 @@ from orchestrasecai.agent.nodes.critic import critic_node
 from orchestrasecai.agent.nodes.executor import executor_node
 from orchestrasecai.agent.nodes.planner import planner_node
 from orchestrasecai.agent.state import AgentState
-from orchestrasecai.scanner.tools.layer import ScanToolLayer
+
+if TYPE_CHECKING:
+    from orchestrasecai.scanner.tools.layer import ScanToolLayer
 
 
 def _merge_trace(existing: list[dict], new: list[dict]) -> list[dict]:
@@ -64,15 +66,12 @@ async def _on_plan_created(state: AgentState, plan) -> None:
         return
     from orchestrasecai.domain.services.event_bus import publish_event
 
-    try:
-        await publish_event(
-            state["scan_id"],
-            "agent.plan_created",
-            {
-                "iteration": state.get("iteration", 0) + 1,
-                "calls_count": len(plan.calls),
-                "reasoning": plan.reasoning[:500],
-            },
-        )
-    except Exception:
-        pass
+    await publish_event(
+        state["scan_id"],
+        "agent.plan_created",
+        {
+            "iteration": state.get("iteration", 0) + 1,
+            "calls_count": len(plan.calls),
+            "reasoning": plan.reasoning[:500],
+        },
+    )

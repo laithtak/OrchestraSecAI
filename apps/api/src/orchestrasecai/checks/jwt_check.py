@@ -40,7 +40,7 @@ class JWTCheck(SecurityCheck):
     plugin_id = "jwt"
     name = "JWT Inspection Check"
     phase = CheckPhase.PAGE
-    aliases = ["jwt"]
+    aliases = ("jwt",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.page:

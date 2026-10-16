@@ -45,7 +45,8 @@ dependencies = [
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
-    "ruff>=0.8.0",
+    # Pinned to a minor version: ruff changes its default rule set between releases.
+    "ruff>=0.16,<0.17",
     "httpx>=0.28.0",
 ]
 
@@ -62,6 +63,14 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency declarations are intentionally evaluated in argument defaults.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "orchestrasecai.api.deps.require_perm",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

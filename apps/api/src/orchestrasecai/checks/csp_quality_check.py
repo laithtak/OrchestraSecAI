@@ -28,7 +28,7 @@ class CspQualityCheck(SecurityCheck):
     plugin_id = "csp_quality"
     name = "CSP Quality Check"
     phase = CheckPhase.PAGE
-    aliases = ["csp_quality"]
+    aliases = ("csp_quality",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.page:

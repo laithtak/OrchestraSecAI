@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from orchestrasecai.agent.schemas import ToolResult
 from orchestrasecai.agent.state import AgentState
 from orchestrasecai.domain.services.event_bus import publish_event
-from orchestrasecai.scanner.tools.layer import ScanToolLayer
+
+if TYPE_CHECKING:
+    from orchestrasecai.scanner.tools.layer import ScanToolLayer
 
 
 async def executor_node(

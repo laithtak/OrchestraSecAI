@@ -5,9 +5,9 @@ from uuid import uuid4
 
 import pytest
 
+from orchestrasecai.persistence.tables.core import Scan, ScanPolicy, ScanTarget
 from orchestrasecai.scanner.active.engine import ActiveProbeEngine
 from orchestrasecai.scanner.tools.layer import ScanToolLayer
-from orchestrasecai.persistence.tables.core import Scan, ScanPolicy, ScanTarget
 
 
 @pytest.mark.asyncio
@@ -68,25 +68,24 @@ async def test_tool_layer_writes_audit_on_run_check():
     with patch(
         "orchestrasecai.scanner.tools.layer.write_audit_log",
         new_callable=AsyncMock,
-    ) as audit_mock:
-        with patch.object(layer, "_get_page_context", new_callable=AsyncMock) as page_mock:
-            from orchestrasecai.checks.base import PageContext
+    ) as audit_mock, patch.object(layer, "_get_page_context", new_callable=AsyncMock) as page_mock:
+        from orchestrasecai.checks.base import PageContext
 
-            page_mock.return_value = PageContext(
-                url="https://example.com",
-                final_url="https://example.com",
-                status_code=200,
-                headers={},
-                cookies=[],
-                body_snippet="",
-                depth=0,
+        page_mock.return_value = PageContext(
+            url="https://example.com",
+            final_url="https://example.com",
+            status_code=200,
+            headers={},
+            cookies=[],
+            body_snippet="",
+            depth=0,
+        )
+        with patch("orchestrasecai.scanner.tools.layer.build_registry") as reg_mock:
+            reg_mock.return_value.get.return_value = None
+            result = await layer.execute(
+                "run_check",
+                {"plugin_id": "header", "target_url": "https://example.com"},
             )
-            with patch("orchestrasecai.scanner.tools.layer.build_registry") as reg_mock:
-                reg_mock.return_value.get.return_value = None
-                result = await layer.execute(
-                    "run_check",
-                    {"plugin_id": "header", "target_url": "https://example.com"},
-                )
-                audit_mock.assert_called_once()
-                assert audit_mock.call_args.kwargs["action"] == "agent.tool_call"
-                assert result.success is False
+            audit_mock.assert_called_once()
+            assert audit_mock.call_args.kwargs["action"] == "agent.tool_call"
+            assert result.success is False

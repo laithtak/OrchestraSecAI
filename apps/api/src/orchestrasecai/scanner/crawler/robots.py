@@ -10,7 +10,9 @@ class RobotsCache:
     def __init__(self) -> None:
         self._parsers: dict[str, RobotFileParser] = {}
 
-    async def fetch(self, client: httpx.AsyncClient, base_url: str, user_agent: str) -> RobotFileParser:
+    async def fetch(
+        self, client: httpx.AsyncClient, base_url: str, user_agent: str
+    ) -> RobotFileParser:
         parsed = urlparse(base_url)
         key = f"{parsed.scheme}://{parsed.netloc}"
         if key in self._parsers:
@@ -24,7 +26,10 @@ class RobotsCache:
                 rp.parse(resp.text.splitlines())
             else:
                 rp.allow_all = True
-        except Exception:
+        except httpx.HTTPError:
+            rp.allow_all = True
+        except ValueError:
+            # Egress denials (e.g. robots.txt redirecting out of scope) are not fatal.
             rp.allow_all = True
         self._parsers[key] = rp
         return rp
@@ -32,5 +37,5 @@ class RobotsCache:
     def can_fetch(self, rp: RobotFileParser, user_agent: str, url: str) -> bool:
         try:
             return rp.can_fetch(user_agent, url)
-        except Exception:
+        except Exception:  # noqa: BLE001 - malformed robots.txt must not stop the crawl
             return True

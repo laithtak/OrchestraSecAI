@@ -1,6 +1,12 @@
 import time
 
-from orchestrasecai.checks.base import CheckContext, CheckPhase, FindingDraft, HostContext, PageContext
+from orchestrasecai.checks.base import (
+    CheckContext,
+    CheckPhase,
+    FindingDraft,
+    HostContext,
+    PageContext,
+)
 from orchestrasecai.scanner.runtime.registry import CheckRegistry
 
 
@@ -30,7 +36,7 @@ class CheckExecutor:
                     "duration_ms": int((time.perf_counter() - start) * 1000),
                     "error": None,
                 }
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - isolate plugin failures per check
                 metrics[check.plugin_id] = {
                     "status": "failed",
                     "duration_ms": int((time.perf_counter() - start) * 1000),
@@ -61,7 +67,7 @@ class CheckExecutor:
                     "duration_ms": int((time.perf_counter() - start) * 1000),
                     "error": None,
                 }
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - isolate plugin failures per check
                 metrics[check.plugin_id] = {
                     "status": "failed",
                     "duration_ms": int((time.perf_counter() - start) * 1000),

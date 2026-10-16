@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import UTC, datetime
 from uuid import UUID
 
 from arq import create_pool
@@ -9,15 +10,31 @@ from fastapi.responses import StreamingResponse
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from orchestrasecai.api.deps import require_perm
-from orchestrasecai.api.schemas import AgentSessionOut, FindingOut, ScanCreate, ScanOut, UserOut
 from orchestrasecai.api.middleware.rate_limit import check_scan_daily_limit
+from orchestrasecai.api.schemas import (
+    AgentSessionOut,
+    EvidenceOut,
+    FindingOut,
+    ScanCreate,
+    ScanOut,
+    UserOut,
+)
+from orchestrasecai.config import get_settings
+from orchestrasecai.domain.scan_lifecycle import (
+    TERMINAL_STATES,
+    ScanErrorCode,
+    transition,
+)
+from orchestrasecai.domain.services.audit import write_audit_log
+from orchestrasecai.domain.services.event_bus import publish_event
+from orchestrasecai.domain.verification import authorize_target_for_scan
 from orchestrasecai.observability.context import bind_context
+from orchestrasecai.observability.logging import get_logger
 from orchestrasecai.observability.metrics import rate_limit_exceeded_total
 from orchestrasecai.observability.tracing import enqueue_with_context
-from orchestrasecai.domain.verification import can_scan_unverified_target
-from orchestrasecai.config import get_settings
 from orchestrasecai.persistence.session import get_db
 from orchestrasecai.persistence.tables.core import (
     AgentSession,
@@ -27,10 +44,10 @@ from orchestrasecai.persistence.tables.core import (
     ScanPolicy,
     ScanStatus,
     ScanTarget,
-    VerificationStatus,
+    Severity,
+    UserRole,
 )
-from orchestrasecai.api.schemas import FindingOut
-from orchestrasecai.observability.logging import get_logger
+from orchestrasecai.security.rbac import has_permission
 
 logger = get_logger(__name__)
 
@@ -40,13 +57,54 @@ _settings = get_settings()
 
 async def _enqueue(scan_id: str, request_id: str | None = None) -> None:
     pool = await create_pool(RedisSettings.from_dsn(_settings.redis_url))
-    await enqueue_with_context(
-        pool,
-        "run_agent_scan_task",
-        scan_id,
-        request_id=request_id,
+    try:
+        await enqueue_with_context(
+            pool,
+            "run_agent_scan_task",
+            scan_id,
+            request_id=request_id,
+            _job_id=f"scan:{scan_id}",
+        )
+    finally:
+        await pool.aclose()
+
+
+def get_enqueue():
+    """Dependency seam for the job queue (tests substitute it)."""
+    return _enqueue
+
+
+def _scan_out(s: Scan) -> ScanOut:
+    return ScanOut(
+        id=s.id,
+        status=s.status.value,
+        mission=s.mission,
+        created_at=s.created_at,
+        stats=s.stats or {},
+        target_id=s.scan_target_id,
+        started_at=s.started_at,
+        finished_at=s.finished_at,
+        error_code=s.error_code,
+        error_message=s.error_message,
+        attempts=s.attempts or 0,
+        active_probes_enabled=bool(s.active_probes_enabled),
+        links={
+            "self": f"/api/v1/scans/{s.id}",
+            "events": f"/api/v1/scans/{s.id}/events",
+            "agent_session": f"/api/v1/scans/{s.id}/agent-session",
+            "findings": f"/api/v1/scans/{s.id}/findings",
+            "report": f"/api/v1/scans/{s.id}/report",
+            "cancel": f"/api/v1/scans/{s.id}/cancel",
+        },
     )
-    await pool.aclose()
+
+
+async def _get_owned_scan(db: AsyncSession, scan_id: UUID, user: UserOut) -> Scan:
+    s = await db.get(Scan, scan_id)
+    if not s or s.org_id != user.org_id:
+        raise HTTPException(404, "Scan not found")
+    bind_context(scan_id=str(scan_id))
+    return s
 
 
 @router.get("", response_model=list[ScanOut])
@@ -57,25 +115,12 @@ async def list_scans(
 ):
     q = select(Scan).where(Scan.org_id == user.org_id).order_by(Scan.created_at.desc())
     if status:
-        q = q.where(Scan.status == ScanStatus(status))
+        try:
+            q = q.where(Scan.status == ScanStatus(status))
+        except ValueError:
+            raise HTTPException(400, "Invalid status filter") from None
     r = await db.execute(q.limit(50))
-    scans = r.scalars().all()
-    return [_scan_out(s) for s in scans]
-
-
-def _scan_out(s: Scan) -> ScanOut:
-    return ScanOut(
-        id=s.id,
-        status=s.status.value,
-        mission=s.mission,
-        created_at=s.created_at,
-        stats=s.stats or {},
-        links={
-            "self": f"/api/v1/scans/{s.id}",
-            "events": f"/api/v1/scans/{s.id}/events",
-            "agent_session": f"/api/v1/scans/{s.id}/agent-session",
-        },
-    )
+    return [_scan_out(s) for s in r.scalars().all()]
 
 
 @router.post("", response_model=ScanOut, status_code=201)
@@ -84,6 +129,7 @@ async def create_scan(
     request: Request,
     user: UserOut = Depends(require_perm("scans:write")),
     db: AsyncSession = Depends(get_db),
+    enqueue=Depends(get_enqueue),
 ):
     target = await db.get(ScanTarget, body.scan_target_id)
     policy = await db.get(ScanPolicy, body.scan_policy_id)
@@ -91,8 +137,14 @@ async def create_scan(
         raise HTTPException(404, "Target not found")
     if not policy or policy.org_id != user.org_id:
         raise HTTPException(404, "Policy not found")
-    if target.verification_status != VerificationStatus.verified and not can_scan_unverified_target():
-        raise HTTPException(403, "Target must be verified before scanning")
+    denial = authorize_target_for_scan(target, org_id=user.org_id, now=datetime.now(UTC))
+    if denial is not None:
+        raise HTTPException(403, f"Target is not authorized for scanning: {denial.value}")
+    if body.allow_active_probes:
+        if not has_permission(UserRole(user.role), "scans:active"):
+            raise HTTPException(403, "Permission denied: scans:active")
+        if not _settings.active_probes_allowed:
+            raise HTTPException(403, "Active probes are disabled on this deployment")
 
     redis: Redis | None = getattr(request.app.state, "redis", None)
     scripts = getattr(request.app.state, "rate_limit_scripts", None)
@@ -107,34 +159,67 @@ async def create_scan(
 
     scan = Scan(
         org_id=user.org_id,
-        scan_target_id=body.scan_target_id,
-        scan_policy_id=body.scan_policy_id,
+        scan_target_id=target.id,
+        scan_policy_id=policy.id,
         mission=body.mission,
         plugin_ids=body.plugin_ids,
         status=ScanStatus.queued,
         created_by=user.id,
+        active_probes_enabled=body.allow_active_probes,
+        attempts=0,
     )
     db.add(scan)
     await db.flush()
-
-    agent_session = AgentSession(
-        scan_id=scan.id,
-        mission=body.mission,
-        max_iterations=_settings.agent_max_iterations,
+    db.add(
+        AgentSession(
+            scan_id=scan.id,
+            mission=body.mission,
+            max_iterations=_settings.agent_max_iterations,
+        )
     )
-    db.add(agent_session)
-    await db.flush()
+    await write_audit_log(
+        db,
+        org_id=user.org_id,
+        user_id=user.id,
+        action="scan.create",
+        resource_type="scan",
+        resource_id=str(scan.id),
+        metadata={
+            "target_id": str(target.id),
+            "verified_domain": target.verified_domain,
+            "active_probes_enabled": body.allow_active_probes,
+        },
+    )
+    if body.allow_active_probes:
+        await write_audit_log(
+            db,
+            org_id=user.org_id,
+            user_id=user.id,
+            action="scan.active_probes_opt_in",
+            resource_type="scan",
+            resource_id=str(scan.id),
+            metadata={"target_id": str(target.id), "role": user.role},
+        )
+    # Commit before enqueueing so the worker can never observe a missing scan row.
+    await db.commit()
     bind_context(scan_id=str(scan.id), org_id=str(user.org_id))
     request.state.scan_id = scan.id
-    request.state.audit_record = {
-        "org_id": user.org_id,
-        "user_id": user.id,
-        "action": "scan.create",
-        "resource_type": "scan",
-        "resource_id": str(scan.id),
-    }
-    request_id = getattr(request.state, "request_id", None)
-    await _enqueue(str(scan.id), request_id=request_id)
+
+    try:
+        await enqueue(str(scan.id), getattr(request.state, "request_id", None))
+    except Exception as exc:
+        logger.error("scan_enqueue_failed", scan_id=str(scan.id), error_type=type(exc).__name__)
+        await transition(
+            db,
+            scan.id,
+            ScanStatus.failed,
+            from_states=[ScanStatus.queued],
+            error_code=ScanErrorCode.queue_unavailable,
+            values={"finished_at": datetime.now(UTC)},
+        )
+        await db.commit()
+        raise HTTPException(503, "Scan queue unavailable; the scan was not started") from exc
+    await db.refresh(scan)
     return _scan_out(scan)
 
 
@@ -144,10 +229,39 @@ async def get_scan(
     user: UserOut = Depends(require_perm("scans:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    s = await db.get(Scan, scan_id)
-    if not s or s.org_id != user.org_id:
-        raise HTTPException(404, "Scan not found")
-    bind_context(scan_id=str(scan_id))
+    return _scan_out(await _get_owned_scan(db, scan_id, user))
+
+
+@router.post("/{scan_id}/cancel", response_model=ScanOut)
+async def cancel_scan(
+    scan_id: UUID,
+    user: UserOut = Depends(require_perm("scans:write")),
+    db: AsyncSession = Depends(get_db),
+):
+    s = await _get_owned_scan(db, scan_id, user)
+    now = datetime.now(UTC)
+    changed = await transition(
+        db,
+        s.id,
+        ScanStatus.cancelled,
+        from_states=[ScanStatus.queued, ScanStatus.running],
+        error_code=ScanErrorCode.cancelled,
+        values={"finished_at": now, "cancel_requested_at": now},
+    )
+    if not changed:
+        await db.refresh(s)
+        raise HTTPException(409, f"Scan is already {s.status.value}")
+    await write_audit_log(
+        db,
+        org_id=user.org_id,
+        user_id=user.id,
+        action="scan.cancel",
+        resource_type="scan",
+        resource_id=str(s.id),
+    )
+    await db.commit()
+    await db.refresh(s)
+    await publish_event(str(s.id), "scan.status_changed", {"status": "cancelled"})
     return _scan_out(s)
 
 
@@ -157,52 +271,58 @@ async def list_pages(
     user: UserOut = Depends(require_perm("scans:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    s = await db.get(Scan, scan_id)
-    if not s or s.org_id != user.org_id:
-        raise HTTPException(404, "Scan not found")
-    bind_context(scan_id=str(scan_id))
-    r = await db.execute(select(CrawlPage).where(CrawlPage.scan_id == scan_id))
-    pages = r.scalars().all()
+    await _get_owned_scan(db, scan_id, user)
+    r = await db.execute(select(CrawlPage).where(CrawlPage.scan_id == scan_id).limit(1000))
     return [
-        {
-            "id": str(p.id),
-            "url": p.url,
-            "status_code": p.status_code,
-            "depth": p.depth,
-        }
-        for p in pages
+        {"id": str(p.id), "url": p.url, "status_code": p.status_code, "depth": p.depth}
+        for p in r.scalars().all()
     ]
+
+
+def _finding_out(f: Finding, *, with_evidence: bool) -> FindingOut:
+    return FindingOut(
+        id=f.id,
+        scan_id=f.scan_id,
+        plugin_id=f.plugin_id,
+        severity=f.severity.value,
+        title=f.title,
+        description=f.description,
+        location=f.location or {},
+        status=f.status.value,
+        fingerprint=f.fingerprint,
+        remediation=f.remediation,
+        check_id=f.check_id,
+        check_version=f.check_version,
+        created_at=f.created_at,
+        evidence=[EvidenceOut(type=e.evidence_type, payload=e.payload) for e in f.evidence]
+        if with_evidence
+        else [],
+    )
 
 
 @router.get("/{scan_id}/findings", response_model=list[FindingOut])
 async def scan_findings(
     scan_id: UUID,
     severity: str | None = None,
+    include_evidence: bool = False,
     user: UserOut = Depends(require_perm("scans:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    s = await db.get(Scan, scan_id)
-    if not s or s.org_id != user.org_id:
-        raise HTTPException(404, "Scan not found")
-    bind_context(scan_id=str(scan_id))
-    q = select(Finding).where(Finding.scan_id == scan_id)
+    await _get_owned_scan(db, scan_id, user)
+    q = (
+        select(Finding)
+        .where(Finding.scan_id == scan_id, Finding.org_id == user.org_id)
+        .order_by(Finding.created_at, Finding.fingerprint)
+    )
+    if include_evidence:
+        q = q.options(selectinload(Finding.evidence))
     if severity:
-        from orchestrasecai.persistence.tables.core import Severity
-
-        q = q.where(Finding.severity == Severity(severity))
+        try:
+            q = q.where(Finding.severity == Severity(severity))
+        except ValueError:
+            raise HTTPException(400, "Invalid severity filter") from None
     r = await db.execute(q)
-    return [
-        FindingOut(
-            id=f.id,
-            plugin_id=f.plugin_id,
-            severity=f.severity.value,
-            title=f.title,
-            description=f.description,
-            location=f.location,
-            status=f.status.value,
-        )
-        for f in r.scalars().all()
-    ]
+    return [_finding_out(f, with_evidence=include_evidence) for f in r.scalars().all()]
 
 
 @router.post("/{scan_id}/analyze")
@@ -212,19 +332,20 @@ async def reanalyze(
     user: UserOut = Depends(require_perm("scans:write")),
     db: AsyncSession = Depends(get_db),
 ):
-    s = await db.get(Scan, scan_id)
-    if not s or s.org_id != user.org_id:
-        raise HTTPException(404, "Scan not found")
+    s = await _get_owned_scan(db, scan_id, user)
+    if s.status not in (ScanStatus.completed, ScanStatus.timed_out):
+        raise HTTPException(409, "AI analysis is only available for finished scans")
     bind_context(scan_id=str(scan_id), org_id=str(user.org_id))
     pool = await create_pool(RedisSettings.from_dsn(_settings.redis_url))
-    request_id = getattr(request.state, "request_id", None)
-    await enqueue_with_context(
-        pool,
-        "run_ai_analysis_task",
-        str(scan_id),
-        request_id=request_id,
-    )
-    await pool.aclose()
+    try:
+        await enqueue_with_context(
+            pool,
+            "run_ai_analysis_task",
+            str(scan_id),
+            request_id=getattr(request.state, "request_id", None),
+        )
+    finally:
+        await pool.aclose()
     return {"status": "queued"}
 
 
@@ -234,14 +355,11 @@ async def get_agent_session(
     user: UserOut = Depends(require_perm("scans:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    s = await db.get(Scan, scan_id)
-    if not s or s.org_id != user.org_id:
-        raise HTTPException(404, "Scan not found")
+    await _get_owned_scan(db, scan_id, user)
     r = await db.execute(select(AgentSession).where(AgentSession.scan_id == scan_id))
     session = r.scalar_one_or_none()
     if not session:
         raise HTTPException(404, "Agent session not found")
-    bind_context(scan_id=str(scan_id))
     return AgentSessionOut(
         mission=session.mission,
         status=session.status.value,
@@ -258,17 +376,19 @@ async def scan_events(
     user: UserOut = Depends(require_perm("scans:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    s = await db.get(Scan, scan_id)
-    if not s or s.org_id != user.org_id:
-        raise HTTPException(404, "Scan not found")
-    bind_context(scan_id=str(scan_id))
+    s = await _get_owned_scan(db, scan_id, user)
+    snapshot = {"event": "scan.snapshot", "status": s.status.value}
+    terminal_values = {st.value for st in TERMINAL_STATES}
 
     async def event_stream():
+        yield f"event: connected\ndata: {json.dumps({'scan_id': str(scan_id)})}\n\n"
+        yield f"event: message\ndata: {json.dumps(snapshot)}\n\n"
+        if snapshot["status"] in terminal_values:
+            return
         redis = Redis.from_url(_settings.redis_url)
         pubsub = redis.pubsub()
         await pubsub.subscribe(f"scan:{scan_id}:events")
         try:
-            yield f"event: connected\ndata: {json.dumps({'scan_id': str(scan_id)})}\n\n"
             while True:
                 msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=30.0)
                 if msg and msg["type"] == "message":
@@ -276,6 +396,11 @@ async def scan_events(
                     if isinstance(data, bytes):
                         data = data.decode()
                     yield f"event: message\ndata: {data}\n\n"
+                    try:
+                        if json.loads(data).get("status") in terminal_values:
+                            return
+                    except (ValueError, AttributeError):
+                        pass
                 else:
                     yield ": keepalive\n\n"
                 await asyncio.sleep(0.1)

@@ -1,11 +1,18 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from orchestrasecai.api.deps import get_current_user
-from orchestrasecai.api.schemas import LoginRequest, MeResponse, RefreshRequest, TokenResponse, UserOut
+from orchestrasecai.api.schemas import (
+    LoginRequest,
+    MeResponse,
+    RefreshRequest,
+    TokenResponse,
+    UserOut,
+)
 from orchestrasecai.persistence.session import get_db
 from orchestrasecai.persistence.tables.core import Organization, User
 from orchestrasecai.security.auth import (
@@ -46,7 +53,7 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
         from uuid import UUID
 
         user_id = UUID(payload["sub"])
-    except Exception:
+    except (JWTError, KeyError, TypeError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid refresh token") from None
     user = await db.get(User, user_id)
     if not user or not user.is_active:

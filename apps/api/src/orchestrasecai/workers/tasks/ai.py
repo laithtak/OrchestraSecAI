@@ -22,10 +22,16 @@ async def run_ai_analysis_task(
             carrier=otel_carrier,
             attributes={"scan_id": scan_id, "job_id": job_id},
         ):
-            await run_full_ai_pipeline(scan_id)
+            outcome = await run_full_ai_pipeline(scan_id)
         arq_jobs_total.labels(task="run_ai_analysis_task", status="success").inc()
-        logger.info("arq_job_completed", task="run_ai_analysis_task", job_id=job_id, scan_id=scan_id)
-        return {"scan_id": scan_id, "status": "ai_complete"}
+        logger.info(
+            "arq_job_completed",
+            task="run_ai_analysis_task",
+            job_id=job_id,
+            scan_id=scan_id,
+            outcome=outcome,
+        )
+        return {"scan_id": scan_id, "status": outcome}
     except Exception as exc:
         arq_jobs_total.labels(task="run_ai_analysis_task", status="error").inc()
         logger.error(
@@ -33,7 +39,7 @@ async def run_ai_analysis_task(
             task="run_ai_analysis_task",
             job_id=job_id,
             scan_id=scan_id,
-            error=str(exc),
+            error_type=type(exc).__name__,
         )
         raise
     finally:

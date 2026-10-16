@@ -7,7 +7,10 @@ from redis.asyncio import Redis
 
 from orchestrasecai.api.middleware.access_log import AccessLogMiddleware
 from orchestrasecai.api.middleware.audit import AuditMiddleware
-from orchestrasecai.api.middleware.rate_limit import RateLimitMiddleware, register_rate_limit_scripts
+from orchestrasecai.api.middleware.rate_limit import (
+    RateLimitMiddleware,
+    register_rate_limit_scripts,
+)
 from orchestrasecai.api.middleware.request_id import RequestIdMiddleware
 from orchestrasecai.api.v1.router import api_router
 from orchestrasecai.config import get_settings

@@ -36,3 +36,6 @@ reports_storage/
 .DS_Store
 Thumbs.db
 docs/
+
+# Local demo output
+apps/api/demo-output/

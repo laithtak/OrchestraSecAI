@@ -1,5 +1,12 @@
 # OrchestraSecAI — System Overview
 
+> **Partially outdated.** Sections describing a passive-only linear crawl → plugins runner,
+> `run_scan_task`, the `crawling`/`scanning`/`analyzing` states, deferred target
+> verification, or AI-driven scan completion no longer match the code. The current scan
+> path, states, verification and network policy are documented in
+> [scan-lifecycle.md](./scan-lifecycle.md), [architecture.md](./architecture.md),
+> [passive-only-policy.md](./passive-only-policy.md) and [threat-model.md](./threat-model.md).
+
 > **Scope:** This document describes OrchestraSecAI **as implemented today** (MVP v0.1.0). It is derived from the codebase under `orchestrasecai/`, not from roadmap documents.
 
 OrchestraSecAI is a **passive web security scanner**: it crawls authorized targets with GET-only HTTP requests, runs built-in security checks, optionally enriches results with AI analysis, and exposes findings and reports through a REST API and Next.js dashboard.

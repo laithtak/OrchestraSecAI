@@ -54,7 +54,7 @@ class CveLookupService:
             metrics = cve.get("metrics", {})
             cvss = None
             for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
-                if key in metrics and metrics[key]:
+                if metrics.get(key):
                     cvss = metrics[key][0].get("cvssData", {}).get("baseScore")
                     break
             vulns.append({

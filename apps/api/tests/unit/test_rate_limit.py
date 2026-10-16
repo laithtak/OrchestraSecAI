@@ -4,7 +4,11 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from orchestrasecai.api.middleware.rate_limit import RateLimitMiddleware, RateLimitScripts, client_ip
+from orchestrasecai.api.middleware.rate_limit import (
+    RateLimitMiddleware,
+    RateLimitScripts,
+    client_ip,
+)
 
 
 class FakeScript:

@@ -7,7 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from orchestrasecai.api.deps import get_current_user, require_perm
 from orchestrasecai.api.schemas import UserOut
-from orchestrasecai.api.services.report_tokens import consume_report_view_token, create_report_view_token
+from orchestrasecai.api.services.report_tokens import (
+    consume_report_view_token,
+    create_report_view_token,
+)
 from orchestrasecai.persistence.session import get_db
 from orchestrasecai.persistence.tables.core import Report, ReportFormat, Scan, UserRole
 from orchestrasecai.security.rbac import require_permission
@@ -28,10 +31,29 @@ async def _fetch_report_content(db: AsyncSession, scan_id: UUID, fmt: ReportForm
     return report
 
 
-def _report_response(report: Report, fmt: ReportFormat) -> Response:
-    if fmt == ReportFormat.html:
-        return Response(content=report.content, media_type="text/html")
-    return Response(content=report.content, media_type="application/json")
+_REPORT_HEADERS = {
+    # Reports embed target-derived content: forbid scripts and framing as defense in
+    # depth on top of template autoescaping.
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; "
+    "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+}
+
+
+def _report_response(report: Report, fmt: ReportFormat, *, download: bool = False) -> Response:
+    headers = dict(_REPORT_HEADERS)
+    headers["X-Report-Version"] = str(report.version)
+    if report.content_sha256:
+        headers["X-Report-SHA256"] = report.content_sha256
+    ext = "html" if fmt == ReportFormat.html else "json"
+    if download:
+        headers["Content-Disposition"] = (
+            f'attachment; filename="orchestrasecai-report-{report.scan_id}-v{report.version}.{ext}"'
+        )
+    media_type = "text/html; charset=utf-8" if fmt == ReportFormat.html else "application/json"
+    return Response(content=report.content, media_type=media_type, headers=headers)
 
 
 @router.post("/scans/{scan_id}/report/view-token")
@@ -39,6 +61,7 @@ async def create_report_view_token_endpoint(
     scan_id: UUID,
     request: Request,
     format: str = "html",
+    download: bool = False,
     user: UserOut = Depends(require_perm("reports:read")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -52,8 +75,9 @@ async def create_report_view_token_endpoint(
 
     fmt = "html" if format == "html" else "json"
     token = await create_report_view_token(redis, scan_id, user.org_id, user.id, fmt)
+    suffix = "&download=true" if download else ""
     return {
-        "url": f"/api/v1/scans/{scan_id}/report?format={fmt}&token={token}",
+        "url": f"/api/v1/scans/{scan_id}/report?format={fmt}&token={token}{suffix}",
     }
 
 
@@ -63,8 +87,11 @@ async def get_report(
     request: Request,
     format: str = "html",
     token: str | None = None,
+    download: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
+    if format not in ("html", "json"):
+        raise HTTPException(400, "format must be html or json")
     fmt = ReportFormat.html if format == "html" else ReportFormat.json
 
     if token:
@@ -82,7 +109,7 @@ async def get_report(
         if not s or str(s.org_id) != payload["org_id"]:
             raise HTTPException(404, "Scan not found")
         report = await _fetch_report_content(db, scan_id, fmt)
-        return _report_response(report, fmt)
+        return _report_response(report, fmt, download=download)
 
     user = await get_current_user(request, db)
     require_permission(UserRole(user.role), "reports:read")
@@ -90,4 +117,4 @@ async def get_report(
     if not s or s.org_id != user.org_id:
         raise HTTPException(404, "Scan not found")
     report = await _fetch_report_content(db, scan_id, fmt)
-    return _report_response(report, fmt)
+    return _report_response(report, fmt, download=download)

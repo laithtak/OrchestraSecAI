@@ -17,7 +17,7 @@ class ClickjackingCheck(SecurityCheck):
     plugin_id = "clickjacking"
     name = "Clickjacking Protection Check"
     phase = CheckPhase.PAGE
-    aliases = ["clickjacking"]
+    aliases = ("clickjacking",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.page:

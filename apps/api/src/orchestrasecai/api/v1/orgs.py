@@ -4,15 +4,9 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-
-
 from orchestrasecai.api.deps import get_current_user
-
 from orchestrasecai.api.schemas import UserOut
-
 from orchestrasecai.config import get_settings
-
-
 
 router = APIRouter(prefix="/orgs", tags=["orgs"])
 

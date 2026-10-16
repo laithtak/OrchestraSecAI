@@ -14,7 +14,7 @@ class HeaderCheck(SecurityCheck):
     plugin_id = "header"
     name = "Security Headers Check"
     phase = CheckPhase.PAGE
-    aliases = ["header"]
+    aliases = ("header",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.page:

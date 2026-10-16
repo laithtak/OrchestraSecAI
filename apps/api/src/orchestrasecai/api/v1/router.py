@@ -1,12 +1,22 @@
 from fastapi import APIRouter
 
-from orchestrasecai.api.v1 import auth, findings, health, orgs, policies, projects, reports, scans, targets
+from orchestrasecai.api.v1 import (
+    auth,
+    findings,
+    health,
+    orgs,
+    policies,
+    projects,
+    reports,
+    scans,
+    targets,
+)
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 
-from orchestrasecai.api.v1.auth import me as me_endpoint  # noqa: E402
+from orchestrasecai.api.v1.auth import me as me_endpoint
 
 api_router.add_api_route("/me", me_endpoint, methods=["GET"], tags=["auth"])
 api_router.include_router(orgs.router)

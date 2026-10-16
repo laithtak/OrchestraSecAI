@@ -38,9 +38,32 @@ export DATABASE_URL_SYNC=postgresql://orchestrasec:orchestrasec@localhost:5432/o
 export REDIS_URL=redis://localhost:6379/0
 alembic upgrade head
 uvicorn orchestrasecai.main:app --reload --port 8000
-# separate terminal:
+# separate terminal (also runs the stale-scan reaper every minute):
 arq orchestrasecai.workers.settings.WorkerSettings
 ```
+
+### Verifying a domain you own
+
+1. **Targets → Add** `https://app.your-domain.com` (must resolve to a public address).
+2. **Generate token** and copy the value (it is shown once).
+3. Publish a DNS TXT record `_orchestrasec.app.your-domain.com` with that value.
+4. **Check DNS**. Once verified, the target can be scanned for
+   `DOMAIN_VERIFICATION_MAX_AGE_DAYS` (default 30) before it must be re-checked.
+
+### Local demo (mock target, no external traffic)
+
+Runs the full lifecycle — registration, DNS verification, authorized scan, findings,
+deterministic report, cancellation — through the real API and worker code against
+PostgreSQL, using an in-process DNS and a mock web server:
+
+```bash
+cd apps/api
+alembic upgrade head
+python scripts/demo_lifecycle.py   # writes reports to apps/api/demo-output/
+```
+
+The data is created in the seeded development organization, so it is visible in the web
+UI afterwards.
 
 ### Web
 
@@ -86,7 +109,7 @@ settings. Invalid configuration stops the process before it serves requests or e
 | API | `apps/api/src/orchestrasecai/api/` | REST, auth, enqueue scans |
 | Scanner | `apps/api/src/orchestrasecai/scanner/` | Crawler + plugin runtime |
 | Checks (plugins) | `apps/api/src/orchestrasecai/checks/` | Header, Cookie, TLS, Disclosure |
-| Workers | `apps/api/src/orchestrasecai/workers/` | ARQ `run_scan_task`, `run_ai_analysis_task` |
+| Workers | `apps/api/src/orchestrasecai/workers/` | ARQ `run_agent_scan_task`, `run_ai_analysis_task`, stale-scan reaper cron |
 | AI | `apps/api/src/orchestrasecai/ai/` | vLLM client, YAML prompts, reports |
 | Web | `apps/web/` | Next.js dashboard |
 
@@ -100,15 +123,34 @@ settings. Invalid configuration stops the process before it serves requests or e
 
 ## Security
 
-- **Passive-only:** GET/HEAD crawler only — see `docs/passive-only-policy.md`
-- **SSRF guards:** Private IP blocklist — see `docs/threat-model.md`
-- **Target verification:** `verification_status` stub (`unverified` default); DNS verify deferred
+- **Verified targets only:** DNS TXT ownership challenge (random, hashed, expiring tokens)
+  enforced by the API and again by the worker — see `docs/scan-lifecycle.md`
+- **Network egress policy:** exact-host scope, every redirect hop validated, public-only
+  DNS with connection pinning, request/response budgets — see `docs/threat-model.md`
+- **Passive by default:** active probes need `ACTIVE_PROBES_ALLOWED=true` plus an audited
+  per-scan opt-in by an owner/admin — see `docs/passive-only-policy.md`
+- **Durable lifecycle:** `queued → running → completed | failed | cancelled | timed_out`,
+  atomic transitions, leases, cancellation, crash recovery
+- **Deterministic reports:** generated without an LLM; AI enrichment is optional and
+  labelled non-authoritative
 
 ## Tests
 
 ```bash
 cd apps/api && pytest
-cd apps/web && npm run lint
+cd apps/web && npm run lint && npm run build
+```
+
+`tests/integration` runs against PostgreSQL (after `alembic upgrade head`) using the
+`DATABASE_URL` from the environment and is skipped when no migrated database is
+reachable. DNS and HTTP are always simulated in-process; no test contacts a real target.
+To run them locally with throwaway containers:
+
+```bash
+docker run -d --name osc-pg -e POSTGRES_USER=orchestrasec -e POSTGRES_PASSWORD=orchestrasec -e POSTGRES_DB=orchestrasecai -p 55432:5432 postgres:16-alpine
+docker run -d --name osc-redis -p 56379:6379 redis:7-alpine
+export DATABASE_URL=postgresql+asyncpg://orchestrasec:orchestrasec@localhost:55432/orchestrasecai DATABASE_URL_SYNC=postgresql://orchestrasec:orchestrasec@localhost:55432/orchestrasecai REDIS_URL=redis://localhost:56379/0 APP_ENV=test
+cd apps/api && alembic upgrade head && pytest
 ```
 
 ## License

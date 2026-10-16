@@ -11,7 +11,7 @@ class SubdomainEnumCheck(SecurityCheck):
     plugin_id = "subdomain_enum"
     name = "Subdomain Enumeration Check"
     phase = CheckPhase.HOST
-    aliases = ["subdomain_enum"]
+    aliases = ("subdomain_enum",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.scan_config.get("enable_active_network_checks"):
@@ -35,7 +35,7 @@ class SubdomainEnumCheck(SecurityCheck):
                         candidate = line.strip().lower().lstrip("*.")
                         if candidate and candidate.endswith(hostname.lower()):
                             subdomains.add(candidate)
-        except Exception:
+        except (httpx.HTTPError, ValueError):  # ValueError includes SSRFError/JSON errors
             return findings
 
         if subdomains:
