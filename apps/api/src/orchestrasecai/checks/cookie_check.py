@@ -7,7 +7,7 @@ class CookieCheck(SecurityCheck):
     plugin_id = "cookie"
     name = "Cookie Security Check"
     phase = CheckPhase.PAGE
-    aliases = ["cookie"]
+    aliases = ("cookie",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.page or not ctx.page.cookies:

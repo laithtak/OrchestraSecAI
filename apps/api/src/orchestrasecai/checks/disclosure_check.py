@@ -12,7 +12,7 @@ class DisclosureCheck(SecurityCheck):
     plugin_id = "disclosure"
     name = "Information Disclosure Check"
     phase = CheckPhase.PAGE
-    aliases = ["disclosure"]
+    aliases = ("disclosure",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.page:

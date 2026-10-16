@@ -66,15 +66,12 @@ async def _on_plan_created(state: AgentState, plan) -> None:
         return
     from orchestrasecai.domain.services.event_bus import publish_event
 
-    try:
-        await publish_event(
-            state["scan_id"],
-            "agent.plan_created",
-            {
-                "iteration": state.get("iteration", 0) + 1,
-                "calls_count": len(plan.calls),
-                "reasoning": plan.reasoning[:500],
-            },
-        )
-    except Exception:
-        pass
+    await publish_event(
+        state["scan_id"],
+        "agent.plan_created",
+        {
+            "iteration": state.get("iteration", 0) + 1,
+            "calls_count": len(plan.calls),
+            "reasoning": plan.reasoning[:500],
+        },
+    )

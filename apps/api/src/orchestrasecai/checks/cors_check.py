@@ -11,7 +11,7 @@ class CorsCheck(SecurityCheck):
     plugin_id = "cors"
     name = "CORS Misconfiguration Check"
     phase = CheckPhase.PAGE
-    aliases = ["cors"]
+    aliases = ("cors",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.page:

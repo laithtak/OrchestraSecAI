@@ -1,8 +1,10 @@
 import hashlib
 
 from orchestrasecai.config import get_settings
+from orchestrasecai.observability.logging import get_logger
 
 settings = get_settings()
+logger = get_logger(__name__)
 
 
 def simple_embedding(text: str, dim: int = 64) -> list[float]:
@@ -39,8 +41,8 @@ async def upsert_finding_embedding(org_id: str, finding_id: str, text: str) -> N
                 )
             ],
         )
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - optional enrichment; client raises many types
+        logger.warning("finding_embedding_upsert_failed", error_type=type(exc).__name__)
 
 
 async def find_similar(org_id: str, text: str, limit: int = 3) -> list[dict]:
@@ -57,5 +59,6 @@ async def find_similar(org_id: str, text: str, limit: int = 3) -> list[dict]:
             query_filter={"must": [{"key": "org_id", "match": {"value": org_id}}]},
         )
         return [{"finding_id": r.payload.get("finding_id"), "score": r.score} for r in results]
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - optional enrichment; client raises many types
+        logger.warning("finding_similarity_search_failed", error_type=type(exc).__name__)
         return []

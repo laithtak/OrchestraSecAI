@@ -13,7 +13,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 
@@ -66,7 +66,7 @@ def _param_name(params: dict, key: str, default: str) -> str:
 class ActiveProbeEngine:
     """Executes allowlisted active probe techniques with scope validation."""
 
-    TECHNIQUES: dict[str, TechniqueSpec] = {}
+    TECHNIQUES: ClassVar[dict[str, TechniqueSpec]] = {}
 
     def __init__(
         self,

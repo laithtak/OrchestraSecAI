@@ -1,26 +1,14 @@
 import re
-
 from uuid import UUID
 
-
-
 from jose import JWTError
-
 from starlette.middleware.base import BaseHTTPMiddleware
-
 from starlette.requests import Request
 
-
-
 from orchestrasecai.api.services.audit import log_audit
-
 from orchestrasecai.observability.logging import get_logger
-
 from orchestrasecai.persistence.session import async_session_factory
-
 from orchestrasecai.security.auth import decode_token
-
-
 
 logger = get_logger(__name__)
 
@@ -176,7 +164,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
                 await session.commit()
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - audit write failures must not fail requests
 
             logger.warning(
 

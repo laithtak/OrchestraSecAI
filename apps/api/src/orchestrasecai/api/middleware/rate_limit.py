@@ -98,8 +98,8 @@ async def check_scan_daily_limit(
         else:
             result = await redis.eval(_DAILY_COUNTER_LUA, 1, redis_key, str(limit), str(DAY_SECONDS))
         remaining = int(result)
-        return remaining > 0, remaining if remaining > 0 else 0
-    except Exception as exc:
+        return remaining > 0, max(0, remaining)
+    except Exception as exc:  # noqa: BLE001 - explicit fail-open/closed policy below
         logger.warning("scan_daily_limit_check_failed", org_id=str(org_id), error=str(exc))
         if settings.rate_limit_fail_open:
             return True, None
@@ -165,7 +165,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             response.headers["X-RateLimit-Limit"] = str(limit)
             response.headers["X-RateLimit-Remaining"] = str(remaining)
             return response
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - explicit fail-open/closed policy below
             logger.warning("rate_limit_check_failed", ip=ip, error=str(exc))
             unavailable = _redis_unavailable_response(settings)
             if unavailable is not None:

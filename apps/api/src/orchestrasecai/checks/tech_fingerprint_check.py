@@ -50,7 +50,7 @@ class TechFingerprintCheck(SecurityCheck):
     plugin_id = "tech_fingerprint"
     name = "Technology Fingerprint Check"
     phase = CheckPhase.PAGE
-    aliases = ["tech_fingerprint"]
+    aliases = ("tech_fingerprint",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.page:

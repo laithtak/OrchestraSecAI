@@ -19,7 +19,7 @@ class S3ExposureCheck(SecurityCheck):
     plugin_id = "s3_exposure"
     name = "Cloud Storage Exposure Check"
     phase = CheckPhase.PAGE
-    aliases = ["s3_exposure"]
+    aliases = ("s3_exposure",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.scan_config.get("enable_active_network_checks"):
@@ -41,7 +41,7 @@ class S3ExposureCheck(SecurityCheck):
                 async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
                     resp = await client.head(bucket_url)
                 status = resp.status_code
-            except Exception:
+            except (httpx.HTTPError, ValueError):  # ValueError includes SSRFError
                 status = None
 
             if status == 200:

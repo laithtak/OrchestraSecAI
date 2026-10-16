@@ -1,14 +1,8 @@
 import json
-
 import secrets
-
 from uuid import UUID
 
-
-
 from redis.asyncio import Redis
-
-
 
 REPORT_TOKEN_TTL_SECONDS = 30
 

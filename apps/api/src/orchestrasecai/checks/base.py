@@ -54,7 +54,7 @@ class SecurityCheck(ABC):
     name: str
     version: str = "1.0.0"
     phase: CheckPhase = CheckPhase.PAGE
-    aliases: list[str] = field(default_factory=list)  # type: ignore[misc]
+    aliases: tuple[str, ...] = ()
 
     @abstractmethod
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:

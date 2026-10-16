@@ -27,16 +27,14 @@ def _looks_like_target(value: str) -> bool:
     candidate = value.strip()
     if candidate.startswith(("http://", "https://", "//")):
         return True
-    if candidate.startswith("/"):
-        return True
-    return False
+    return candidate.startswith("/")
 
 
 class OpenRedirectCheck(SecurityCheck):
     plugin_id = "open_redirect"
     name = "Open Redirect Candidate Check"
     phase = CheckPhase.PAGE
-    aliases = ["open_redirect"]
+    aliases = ("open_redirect",)
 
     async def run(self, ctx: CheckContext) -> list[FindingDraft]:
         if not ctx.page:

@@ -111,7 +111,7 @@ async def test_crawl_respects_max_pages_and_request_budget():
 
 @pytest.mark.asyncio
 async def test_crawl_honours_blocked_path_patterns_and_cancellation():
-    handler, requests = site(
+    handler, _requests = site(
         {"app.example.com/": html('<a href="/logout">x</a><a href="/ok">y</a>'),
          "app.example.com/ok": html("ok")}
     )
